@@ -28,6 +28,7 @@
 %% API
 -export([get/2, fetch/1]).
 -export([put/2]).
+-export([update/3]).
 -export([delete/1]).
 
 %% includes
@@ -59,6 +60,20 @@ put(Key, Value) ->
         mnesia:write(#ram_table{
             key = Key,
             value = Value
+        })
+    end,
+    mnesia:activity(transaction, F).
+
+-spec update(Key :: term(), Default :: term(), function()) -> ok.
+update(Key, Default, Fun) ->
+    F = fun() ->
+        NewValue = case mnesia:read({ram_table, Key}) of
+            [] -> Default;
+            [#ram_table{value = Value}] -> Fun(Value)
+        end,
+        mnesia:write(#ram_table{
+            key = Key,
+            value = NewValue
         })
     end,
     mnesia:activity(transaction, F).

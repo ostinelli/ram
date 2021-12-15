@@ -179,4 +179,19 @@ three_nodes_main(Config) ->
     undefined = ram:get("key"),
     default = ram:get("key", default),
     undefined = rpc:call(SlaveNode1, ram, get, ["key"]),
-    undefined = rpc:call(SlaveNode2, ram, get, ["key"]).
+    undefined = rpc:call(SlaveNode2, ram, get, ["key"]),
+
+    ComplexKey = {key, self()},
+
+    UpdateFun = fun(ExistingValue) -> ExistingValue * 2 end,
+    ok = ram:update(ComplexKey, 10, UpdateFun),
+
+    10 = ram:get(ComplexKey),
+    10 = rpc:call(SlaveNode1, ram, get, [ComplexKey]),
+    10 = rpc:call(SlaveNode2, ram, get, [ComplexKey]),
+
+    ok = ram:update(ComplexKey, 10, UpdateFun),
+
+    20 = ram:get(ComplexKey),
+    20 = rpc:call(SlaveNode1, ram, get, [ComplexKey]),
+    20 = rpc:call(SlaveNode2, ram, get, [ComplexKey]).

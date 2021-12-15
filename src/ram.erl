@@ -29,6 +29,7 @@
 -export([start/0, stop/0]).
 -export([get/1, get/2, fetch/1]).
 -export([put/2]).
+-export([update/3]).
 -export([delete/1]).
 
 -spec start() -> ok.
@@ -55,6 +56,10 @@ fetch(Key) ->
 -spec put(Key :: term(), Value :: term()) -> ok | {error, Reason :: term()}.
 put(Key, Value) ->
     ram_kv:put(Key, Value).
+
+-spec update(Key :: term(), Default :: term(), function()) -> ok.
+update(Key, Default, Fun) ->
+    ram_kv:update(Key, Default, Fun).
 
 -spec delete(Key :: term()) -> ok.
 delete(Key) ->
