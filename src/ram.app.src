@@ -1,0 +1,18 @@
+{application, ram,
+    [
+        {description, "An ephemeral distributed KV store for Erlang and Elixir."},
+        {vsn, "0.1.0"},
+        {registered, [
+            ram_backbone
+        ]},
+        {applications, [
+            kernel,
+            stdlib
+        ]},
+        {mod, {ram_app, []}},
+        {env, []},
+
+        {licenses, ["MIT"]},
+        {links, [{"Github", "https://github.com/ostinelli/ram"}]}
+    ]
+}.
