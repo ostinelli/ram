@@ -26,7 +26,7 @@
 -module(ram_kv).
 
 %% API
--export([get/1, put/2]).
+-export([get/1, put/2, delete/1]).
 
 %% includes
 -include("ram.hrl").
@@ -52,4 +52,9 @@ put(Key, Value) ->
             value = Value
         })
     end,
+    mnesia:activity(transaction, F).
+
+-spec delete(Key :: term()) -> ok.
+delete(Key) ->
+    F = fun() -> mnesia:delete({ram_table, Key}) end,
     mnesia:activity(transaction, F).

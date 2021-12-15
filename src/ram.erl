@@ -27,7 +27,7 @@
 
 %% API
 -export([start/0, stop/0]).
--export([get/1, put/2]).
+-export([get/1, put/2, delete/1]).
 
 -spec start() -> ok.
 start() ->
@@ -46,3 +46,6 @@ get(Key) ->
 put(Key, Value) ->
     ram_kv:put(Key, Value).
 
+-spec delete(Key :: term()) -> ok.
+delete(Key) ->
+    ram_kv:delete(Key).

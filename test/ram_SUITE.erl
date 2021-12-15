@@ -33,7 +33,7 @@
 
 %% tests
 -export([
-    three_nodes_put_and_get/1
+    three_nodes_main/1
 ]).
 
 %% include
@@ -70,7 +70,7 @@ all() ->
 groups() ->
     [
         {three_nodes, [shuffle], [
-            three_nodes_put_and_get
+            three_nodes_main
         ]}
     ].
 %% -------------------------------------------------------------------
@@ -146,7 +146,7 @@ end_per_testcase(_, _Config) ->
 %% ===================================================================
 %% Tests
 %% ===================================================================
-three_nodes_put_and_get(Config) ->
+three_nodes_main(Config) ->
     %% get slaves
     SlaveNode1 = proplists:get_value(ram_slave_1, Config),
     SlaveNode2 = proplists:get_value(ram_slave_2, Config),
@@ -162,7 +162,13 @@ three_nodes_put_and_get(Config) ->
     {error, undefined} = rpc:call(SlaveNode2, ram, get, ["key"]),
 
     ram:put("key", "value"),
-
     {ok, "value"} = ram:get("key"),
     {ok, "value"} = rpc:call(SlaveNode1, ram, get, ["key"]),
-    {ok, "value"} = rpc:call(SlaveNode2, ram, get, ["key"]).
+    {ok, "value"} = rpc:call(SlaveNode2, ram, get, ["key"]),
+
+    ok = rpc:call(SlaveNode1, ram, delete, ["key"]),
+    ok = rpc:call(SlaveNode1, ram, delete, ["key"]),
+
+    {error, undefined} = ram:get("key"),
+    {error, undefined} = rpc:call(SlaveNode1, ram, get, ["key"]),
+    {error, undefined} = rpc:call(SlaveNode2, ram, get, ["key"]).
