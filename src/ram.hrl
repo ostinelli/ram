@@ -23,26 +23,7 @@
 %% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 %% THE SOFTWARE.
 %% ==========================================================================================================
--module(ram).
-
-%% API
--export([start/0, stop/0]).
--export([get/1, put/2]).
-
--spec start() -> ok.
-start() ->
-    {ok, _} = application:ensure_all_started(ram),
-    ok.
-
--spec stop() -> ok | {error, Reason :: term()}.
-stop() ->
-    application:stop(ram).
-
--spec get(Key :: term()) -> {ok, Value :: term()} | {error, Reason :: term()}.
-get(Key) ->
-    ram_kv:get(Key).
-
--spec put(Key :: term(), Value :: term()) -> ok | {error, Reason :: term()}.
-put(Key, Value) ->
-    ram_kv:put(Key, Value).
-
+-record(ram_table, {
+    key = undefined :: term(),
+    value = undefined :: term()
+}).

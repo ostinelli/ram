@@ -23,26 +23,33 @@
 %% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 %% THE SOFTWARE.
 %% ==========================================================================================================
--module(ram).
+-module(ram_kv).
 
 %% API
--export([start/0, stop/0]).
 -export([get/1, put/2]).
 
--spec start() -> ok.
-start() ->
-    {ok, _} = application:ensure_all_started(ram),
-    ok.
+%% includes
+-include("ram.hrl").
 
--spec stop() -> ok | {error, Reason :: term()}.
-stop() ->
-    application:stop(ram).
-
+%% ===================================================================
+%% API
+%% ===================================================================
 -spec get(Key :: term()) -> {ok, Value :: term()} | {error, Reason :: term()}.
 get(Key) ->
-    ram_kv:get(Key).
+    F = fun() ->
+        case mnesia:read({ram_table, Key}) of
+            [] -> {error, undefined};
+            [#ram_table{value = Value}] -> {ok, Value}
+        end
+    end,
+    mnesia:activity(transaction, F).
 
 -spec put(Key :: term(), Value :: term()) -> ok | {error, Reason :: term()}.
 put(Key, Value) ->
-    ram_kv:put(Key, Value).
-
+    F = fun() ->
+        mnesia:write(#ram_table{
+            key = Key,
+            value = Value
+        })
+    end,
+    mnesia:activity(transaction, F).

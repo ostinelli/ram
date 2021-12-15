@@ -97,10 +97,8 @@ start_slave(NodeShortName) ->
         {boot_timeout, 10},
         {erl_flags, "-connect_all false -kernel dist_auto_connect never"}
     ]),
-    %% add ram code path to slaves
-    CodePath = lists:filter(fun(Path) ->
-        nomatch =/= string:find(Path, "/ram/")
-    end, code:get_path()),
+    %% add code path
+    CodePath = code:get_path(),
     true = rpc:call(Node, code, set_path, [CodePath]),
     %% return
     {ok, Node}.

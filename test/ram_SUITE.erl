@@ -154,4 +154,15 @@ three_nodes_put_and_get(Config) ->
     %% start ram on nodes
     ok = ram:start(),
     ok = rpc:call(SlaveNode1, ram, start, []),
-    ok = rpc:call(SlaveNode2, ram, start, []).
+    ok = rpc:call(SlaveNode2, ram, start, []),
+
+    %% consistent operations
+    {error, undefined} = ram:get("key"),
+    {error, undefined} = rpc:call(SlaveNode1, ram, get, ["key"]),
+    {error, undefined} = rpc:call(SlaveNode2, ram, get, ["key"]),
+
+    ram:put("key", "value"),
+
+    {ok, "value"} = ram:get("key"),
+    {ok, "value"} = rpc:call(SlaveNode1, ram, get, ["key"]),
+    {ok, "value"} = rpc:call(SlaveNode2, ram, get, ["key"]).
