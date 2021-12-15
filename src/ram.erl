@@ -27,7 +27,9 @@
 
 %% API
 -export([start/0, stop/0]).
--export([get/1, put/2, delete/1]).
+-export([get/1, get/2, fetch/1]).
+-export([put/2]).
+-export([delete/1]).
 
 -spec start() -> ok.
 start() ->
@@ -38,9 +40,17 @@ start() ->
 stop() ->
     application:stop(ram).
 
--spec get(Key :: term()) -> {ok, Value :: term()} | {error, Reason :: term()}.
+-spec get(Key :: term()) -> Value :: term().
 get(Key) ->
-    ram_kv:get(Key).
+    get(Key, undefined).
+
+-spec get(Key :: term(), Default :: term()) -> Value :: term().
+get(Key, Default) ->
+    ram_kv:get(Key, Default).
+
+-spec fetch(Key :: term()) -> {ok, Value :: term()} | error.
+fetch(Key) ->
+    ram_kv:fetch(Key).
 
 -spec put(Key :: term(), Value :: term()) -> ok | {error, Reason :: term()}.
 put(Key, Value) ->

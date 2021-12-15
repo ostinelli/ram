@@ -26,7 +26,9 @@
 -module(ram_kv).
 
 %% API
--export([get/1, put/2, delete/1]).
+-export([get/2, fetch/1]).
+-export([put/2]).
+-export([delete/1]).
 
 %% includes
 -include("ram.hrl").
@@ -34,11 +36,18 @@
 %% ===================================================================
 %% API
 %% ===================================================================
--spec get(Key :: term()) -> {ok, Value :: term()} | {error, Reason :: term()}.
-get(Key) ->
+-spec get(Key :: term(), Default :: term()) -> Value :: term().
+get(Key, Default) ->
+    case fetch(Key) of
+        error -> Default;
+        {ok, Value} -> Value
+    end.
+
+-spec fetch(Key :: term()) -> {ok, Value :: term()} | error.
+fetch(Key) ->
     F = fun() ->
         case mnesia:read({ram_table, Key}) of
-            [] -> {error, undefined};
+            [] -> error;
             [#ram_table{value = Value}] -> {ok, Value}
         end
     end,

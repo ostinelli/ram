@@ -157,18 +157,26 @@ three_nodes_main(Config) ->
     ok = rpc:call(SlaveNode2, ram, start, []),
 
     %% consistent operations
-    {error, undefined} = ram:get("key"),
-    {error, undefined} = rpc:call(SlaveNode1, ram, get, ["key"]),
-    {error, undefined} = rpc:call(SlaveNode2, ram, get, ["key"]),
+    error = ram:fetch("key"),
+    undefined = ram:get("key"),
+    default = ram:get("key", default),
+    undefined = rpc:call(SlaveNode1, ram, get, ["key"]),
+    undefined = rpc:call(SlaveNode2, ram, get, ["key"]),
 
     ram:put("key", "value"),
-    {ok, "value"} = ram:get("key"),
-    {ok, "value"} = rpc:call(SlaveNode1, ram, get, ["key"]),
-    {ok, "value"} = rpc:call(SlaveNode2, ram, get, ["key"]),
+
+    {ok, "value"} = ram:fetch("key"),
+    "value" = ram:get("key"),
+    "value" = ram:get("key", default),
+    "value" = ram:get("key"),
+    "value" = rpc:call(SlaveNode1, ram, get, ["key"]),
+    "value" = rpc:call(SlaveNode2, ram, get, ["key"]),
 
     ok = rpc:call(SlaveNode1, ram, delete, ["key"]),
     ok = rpc:call(SlaveNode1, ram, delete, ["key"]),
 
-    {error, undefined} = ram:get("key"),
-    {error, undefined} = rpc:call(SlaveNode1, ram, get, ["key"]),
-    {error, undefined} = rpc:call(SlaveNode2, ram, get, ["key"]).
+    error = ram:fetch("key"),
+    undefined = ram:get("key"),
+    default = ram:get("key", default),
+    undefined = rpc:call(SlaveNode1, ram, get, ["key"]),
+    undefined = rpc:call(SlaveNode2, ram, get, ["key"]).
