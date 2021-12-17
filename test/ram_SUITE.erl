@@ -34,11 +34,13 @@
 %% tests
 -export([
     three_nodes_main/1,
-    three_nodes_cluster_changes/1
+    three_nodes_cluster_changes/1,
+    three_nodes_consistency/1
 ]).
 
 %% include
 -include_lib("common_test/include/ct.hrl").
+-include("../src/ram.hrl").
 
 %% ===================================================================
 %% Callbacks
@@ -72,7 +74,8 @@ groups() ->
     [
         {three_nodes, [shuffle], [
             three_nodes_main,
-            three_nodes_cluster_changes
+            three_nodes_cluster_changes,
+            three_nodes_consistency
         ]}
     ].
 %% -------------------------------------------------------------------
@@ -241,3 +244,44 @@ three_nodes_cluster_changes(Config) ->
     {ok, "value-2", _} = ram:get("key-2"),
     {ok, "value-2", _} = rpc:call(SlaveNode1, ram, get, ["key-2"]),
     {ok, "value-2", _} = rpc:call(SlaveNode2, ram, get, ["key-2"]).
+
+three_nodes_consistency(Config) ->
+    %% get slaves
+    SlaveNode1 = proplists:get_value(ram_slave_1, Config),
+    SlaveNode2 = proplists:get_value(ram_slave_2, Config),
+
+    %% start ram on nodes
+    ok = ram:start(),
+    ok = rpc:call(SlaveNode1, ram, start, []),
+    ok = rpc:call(SlaveNode2, ram, start, []),
+
+    %% create issue on slave 1
+    ok = rpc:call(SlaveNode1, ram_test_suite_helper, kill_process, [ram_kv]),
+
+    %% put
+    {ok, Version} = ram:put("key", "value"),
+
+    %% retrieve
+    {ok, "value", Version} = ram:get("key"),
+    {ok, "value", Version} = rpc:call(SlaveNode2, ram, get, ["key"]),
+
+    rpc:call(SlaveNode1, ram_test_suite_helper, wait_process_name_ready, [ram_kv]),
+    {ok, "value", Version} = rpc:call(SlaveNode1, ram, get, ["key"]),
+
+    %% create bigger issue on slave 1
+    ok = rpc:call(SlaveNode1, ram_test_suite_helper, kill_process, [ram_sup]),
+    ok = rpc:call(SlaveNode1, ram_test_suite_helper, kill_process, [ram_kv]),
+
+    %% put, this will raise an error
+    {error, transaction_failed} = ram:put("key-2", "value-2"),
+
+    %% retrieve
+    {error, undefined} = ram:get("key-2"),
+    {error, undefined} = rpc:call(SlaveNode2, ram, get, ["key-2"]),
+
+    %% delete, this will raise an error
+    {error, transaction_failed} = ram:delete("key"),
+
+    %% retrieve
+    {ok, "value", Version} = ram:get("key"),
+    {ok, "value", Version} = rpc:call(SlaveNode2, ram, get, ["key"]).

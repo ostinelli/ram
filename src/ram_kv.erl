@@ -42,6 +42,10 @@
     code_change/3
 ]).
 
+%% internals
+-export([do_put/3]).
+-export([do_delete/1]).
+
 %% records
 -record(state, {
     sync_requested = false :: boolean()
@@ -113,34 +117,50 @@ init([]) ->
     {stop, Reason :: term(), Reply :: term(), #state{}} |
     {stop, Reason :: term(), #state{}}.
 handle_call({put, Key, Value, Version}, From, State) ->
-    VersionMatch = case ets:lookup(?TABLE, Key) of
+    {VersionMatch, TableObject} = case ets:lookup(?TABLE, Key) of
         [] ->
             case Version of
-                undefined -> ok;
-                _ -> {error, deleted}
+                undefined -> {ok, undefined};
+                _ -> {{error, deleted}, undefined}
             end;
-        [{_, _, Version}] ->
-            ok;
+        [{_, _, Version} = TableObject0] ->
+            {ok, TableObject0};
 
         _ ->
-            {error, outdated}
+            {{error, outdated}, undefined}
     end,
     case VersionMatch of
         ok ->
-            spawn(fun() ->
-                Nodes = nodes(),
+            spawn_link(fun() ->
+                Nodes = [node() | nodes()],
                 Version1 = generate_id(),
                 %% send
-                lists:foreach(fun(RemoteNode) ->
-                    {?MODULE, RemoteNode} ! {'1.0', self(), put, Key, Value, Version1}
-                end, Nodes),
-                %% wait for confirmation
-                receive_put_ack(Key, Value, Version1, Nodes),
-                %% TODO: rollback on timeout / errors
-                %% insert
-                true = ets:insert(?TABLE, {Key, Value, Version1}),
-                %% reply
-                gen_server:reply(From, {ok, Version1})
+                Res0 = lists:foldl(fun(RemoteNode, Acc) ->
+                    [rpc:call(RemoteNode, ?MODULE, do_put, [Key, Value, Version1]) | Acc]
+                end, [], Nodes),
+                ResSet = sets:from_list(Res0),
+                Res = sets:to_list(ResSet),
+                case Res of
+                    [ok] ->
+                        %% reply
+                        gen_server:reply(From, {ok, Version1});
+
+                    _ ->
+                        %% revert
+                        case TableObject of
+                            {Key0, Value0, Version} ->
+                                lists:foreach(fun(RemoteNode) ->
+                                    rpc:call(RemoteNode, ?MODULE, do_put, [Key0, Value0, Version])
+                                end, Nodes);
+
+                            undefined ->
+                                lists:foreach(fun(RemoteNode) ->
+                                    rpc:call(RemoteNode, ?MODULE, do_delete, [Key])
+                                end, Nodes)
+                        end,
+                        %% reply
+                        gen_server:reply(From, {error, transaction_failed})
+                end
             end),
             %% return
             {noreply, State};
@@ -154,20 +174,28 @@ handle_call({delete, Key}, From, State) ->
         [] ->
             {reply, {error, undefined}, State};
 
-        [{_, _, _}] ->
-            spawn(fun() ->
-                Nodes = nodes(),
+        [{_, Value0, Version0}] ->
+            spawn_link(fun() ->
+                Nodes = [node() | nodes()],
                 %% send
-                lists:foreach(fun(RemoteNode) ->
-                    {?MODULE, RemoteNode} ! {'1.0', self(), delete, Key}
-                end, Nodes),
-                %% wait for confirmation
-                receive_delete_ack(Key, Nodes),
-                %% TODO: rollback on timeout / errors
-                %% delete
-                true = ets:delete(?TABLE, Key),
-                %% reply
-                gen_server:reply(From, ok)
+                Res0 = lists:foldl(fun(RemoteNode, Acc) ->
+                    [rpc:call(RemoteNode, ?MODULE, do_delete, [Key]) | Acc]
+                end, [], Nodes),
+                ResSet = sets:from_list(Res0),
+                Res = sets:to_list(ResSet),
+                case Res of
+                    [ok] ->
+                        %% reply
+                        gen_server:reply(From, ok);
+
+                    _ ->
+                        %% revert
+                        lists:foreach(fun(RemoteNode) ->
+                            rpc:call(RemoteNode, ?MODULE, do_put, [Key, Value0, Version0])
+                        end, Nodes),
+                        %% reply
+                        gen_server:reply(From, {error, transaction_failed})
+                end
             end),
             %% return
             {noreply, State}
@@ -195,22 +223,6 @@ handle_cast(Msg, State) ->
     {noreply, #state{}} |
     {noreply, #state{}, Timeout :: non_neg_integer()} |
     {stop, Reason :: term(), #state{}}.
-handle_info({'1.0', RemotePid, put, Key, Value, Version}, State) ->
-    %% insert
-    true = ets:insert(?TABLE, {Key, Value, Version}),
-    %% reply
-    RemotePid ! {self(), put, Key, Value, Version},
-    %% return
-    {noreply, State};
-
-handle_info({'1.0', RemotePid, delete, Key}, State) ->
-    %% delete
-    true = ets:delete(?TABLE, Key),
-    %% reply
-    RemotePid ! {self(), delete, Key},
-    %% return
-    {noreply, State};
-
 handle_info({nodedown, RemoteNode}, State) ->
     error_logger:info_msg("RAM[~s] Node ~s left the cluster", [node(), RemoteNode]),
     {noreply, State};
@@ -274,21 +286,15 @@ code_change(_OldVsn, State, _Extra) ->
 %% ===================================================================
 %% Internal
 %% ===================================================================
--spec receive_put_ack(Key :: term(), Value :: term(), Version :: term(), Nodes :: [node()]) -> ok.
-receive_put_ack(_Key, _Value, _Version, []) -> ok;
-receive_put_ack(Key, Value, Version, Nodes) ->
-    receive
-        {Pid, put, Key, Value, Version} ->
-            receive_put_ack(Key, Value, Version, lists:delete(node(Pid), Nodes))
-    end.
+-spec do_put(Key :: term(), Value :: term(), Version :: term()) -> ok.
+do_put(Key, Value, Version) ->
+    true = ets:insert(?TABLE, {Key, Value, Version}),
+    ok.
 
--spec receive_delete_ack(Key :: term(), Nodes :: [node()]) -> ok.
-receive_delete_ack(_Key, []) -> ok;
-receive_delete_ack(Key, Nodes) ->
-    receive
-        {Pid, delete, Key} ->
-            receive_delete_ack(Key, lists:delete(node(Pid), Nodes))
-    end.
+-spec do_delete(Key :: term()) -> ok.
+do_delete(Key) ->
+    true = ets:delete(?TABLE, Key),
+    ok.
 
 -spec generate_id() -> binary().
 generate_id() ->

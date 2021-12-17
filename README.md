@@ -61,7 +61,7 @@ Before implementing a new feature, please submit a ticket to discuss what you in
 
 Do not commit to master in your fork. Provide a clean branch without merge commits. Every pull request should have its own topic branch. In this way, every additional adjustments to the original pull request might be done easily, and squashed with `git rebase -i`. The updated branch will be visible in the same pull request, so there will be no need to open new pull requests when there are changes to be applied.
 
-Ensure that proper testing is included. To run Syn tests you simply have to be in the project's root directory and run:
+Ensure that proper testing is included. To run Ram tests you simply have to be in the project's root directory and run:
 
 ```bash
 $ make test
