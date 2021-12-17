@@ -16,8 +16,8 @@ dialyzer:
 	@rebar3 dialyzer
 
 run: all
-ifdef node
-	@# 'make test node=ram2@127.0.0.1
+ifdef sname
+	@# 'make test sname=ram2
 	@erl -pa `rebar3 path` \
 	-name $(sname)@127.0.0.1 \
 	-eval 'ram:start().'
