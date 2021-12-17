@@ -7,8 +7,7 @@
         ]},
         {applications, [
             kernel,
-            stdlib,
-            mnesia
+            stdlib
         ]},
         {mod, {ram_app, []}},
         {env, []},

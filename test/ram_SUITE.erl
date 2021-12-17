@@ -156,42 +156,44 @@ three_nodes_main(Config) ->
     ok = rpc:call(SlaveNode1, ram, start, []),
     ok = rpc:call(SlaveNode2, ram, start, []),
 
-    %% consistent operations
-    error = ram:fetch("key"),
+    %% operations
     undefined = ram:get("key"),
-    default = ram:get("key", default),
     undefined = rpc:call(SlaveNode1, ram, get, ["key"]),
     undefined = rpc:call(SlaveNode2, ram, get, ["key"]),
 
-    ram:put("key", "value"),
+    %% no previous known versions, put
+    {ok, Version} = ram:put("key", "value-0"),
 
-    {ok, "value"} = ram:fetch("key"),
-    "value" = ram:get("key"),
-    "value" = ram:get("key", default),
-    "value" = ram:get("key"),
-    "value" = rpc:call(SlaveNode1, ram, get, ["key"]),
-    "value" = rpc:call(SlaveNode2, ram, get, ["key"]),
+    %% retrieve
+    {ok, "value-0", Version} = ram:get("key"),
+    {ok, "value-0", Version} = rpc:call(SlaveNode1, ram, get, ["key"]),
+    {ok, "value-0", Version} = rpc:call(SlaveNode2, ram, get, ["key"]),
+    false = undefined =:= Version,
 
-    ok = rpc:call(SlaveNode1, ram, delete, ["key"]),
-    ok = rpc:call(SlaveNode1, ram, delete, ["key"]),
+    %% update
+    {ok, Version1} = ram:put("key", "value-1", Version),
+    {error, outdated} = rpc:call(SlaveNode1, ram, put, ["key", "value-slave-1", Version]),
+    false = Version1 =:= Version,
 
-    error = ram:fetch("key"),
+    %% retrieve
+    {ok, "value-1", Version1} = ram:get("key"),
+    {ok, "value-1", Version1} = rpc:call(SlaveNode1, ram, get, ["key"]),
+    {ok, "value-1", Version1} = rpc:call(SlaveNode2, ram, get, ["key"]),
+
+    %% update
+    {ok, Version2} = rpc:call(SlaveNode1, ram, put, ["key", "value-slave-1", Version1]),
+
+    %% retrieve
+    {ok, "value-slave-1", Version2} = ram:get("key"),
+    {ok, "value-slave-1", Version2} = rpc:call(SlaveNode1, ram, get, ["key"]),
+    {ok, "value-slave-1", Version2} = rpc:call(SlaveNode2, ram, get, ["key"]),
+
+    %% delete
+    ok = ram:delete("key"),
+    {error, undefined} = ram:delete("key"),
+    {error, deleted} = rpc:call(SlaveNode1, ram, put, ["key", "value-slave-1", Version1]),
+
+    %% retrieve
     undefined = ram:get("key"),
-    default = ram:get("key", default),
     undefined = rpc:call(SlaveNode1, ram, get, ["key"]),
-    undefined = rpc:call(SlaveNode2, ram, get, ["key"]),
-
-    ComplexKey = {key, self()},
-
-    UpdateFun = fun(ExistingValue) -> ExistingValue * 2 end,
-    ok = ram:update(ComplexKey, 10, UpdateFun),
-
-    10 = ram:get(ComplexKey),
-    10 = rpc:call(SlaveNode1, ram, get, [ComplexKey]),
-    10 = rpc:call(SlaveNode2, ram, get, [ComplexKey]),
-
-    ok = ram:update(ComplexKey, 10, UpdateFun),
-
-    20 = ram:get(ComplexKey),
-    20 = rpc:call(SlaveNode1, ram, get, [ComplexKey]),
-    20 = rpc:call(SlaveNode2, ram, get, [ComplexKey]).
+    undefined = rpc:call(SlaveNode2, ram, get, ["key"]).

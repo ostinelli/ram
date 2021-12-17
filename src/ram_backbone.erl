@@ -1,5 +1,5 @@
 %% ==========================================================================================================
-%% Ram - An ephemeral distributed KV store for Erlang and Elixir.
+%% Ram - An in-memory distributed KV store for Erlang and Elixir.
 %%
 %% The MIT License (MIT)
 %%
@@ -34,14 +34,12 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 %% records
--record(state, {
-
-}).
+-record(state, {}).
 
 %% includes
 -include("ram.hrl").
 
--if (?OTP_RELEASE >= 23).
+- if (?OTP_RELEASE >= 23).
 -define(ETS_OPTIMIZATIONS, [{decentralized_counters, true}]).
 -else.
 -define(ETS_OPTIMIZATIONS, []).
@@ -68,8 +66,21 @@ start_link() ->
     ignore |
     {stop, Reason :: term()}.
 init([]) ->
-    %% init db with current node set
-    init_mnesia_tables(),
+    %% create main table
+    case ets:info(?TABLE) of
+        undefined ->
+            ets:new(?TABLE, [
+                set,
+                public,
+                named_table,
+                {write_concurrency, true},
+                {read_concurrency, true}
+            ] ++ ?ETS_OPTIMIZATIONS),
+            error_logger:info_msg("RAM[~s] Created table", [node()]);
+
+        _ ->
+            ok
+    end,
     %% init
     {ok, #state{}}.
 
@@ -124,57 +135,3 @@ terminate(Reason, _State) ->
 -spec code_change(OldVsn :: term(), #state{}, Extra :: term()) -> {ok, #state{}}.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-%% ===================================================================
-%% Internal
-%% ===================================================================
-init_mnesia_tables() ->
-    ClusterNodes = [node() | nodes()],
-    {ok, _} = mnesia:change_config(extra_db_nodes, ClusterNodes),
-    %% create tables
-    create_table(ram_table, [
-        {type, set},
-        {ram_copies, ClusterNodes},
-        {attributes, record_info(fields, ram_table)},
-        {storage_properties, [{ets, [{read_concurrency, true}, {write_concurrency, true}] ++ ?ETS_OPTIMIZATIONS}]}
-    ]).
-
--spec create_table(TableName :: atom(), Options :: [tuple()]) -> ok | {error, any()}.
-create_table(TableName, Options) ->
-    CurrentNode = node(),
-    %% ensure table exists
-    case mnesia:create_table(TableName, Options) of
-        {atomic, ok} ->
-            error_logger:info_msg("~p was successfully created~n", [TableName]),
-            ok;
-        {aborted, {already_exists, TableName}} ->
-            %% table already exists, try to add current node as copy
-            add_table_copy_to_current_node(TableName);
-        {aborted, {already_exists, TableName, CurrentNode}} ->
-            %% table already exists, try to add current node as copy
-            add_table_copy_to_current_node(TableName);
-        Other ->
-            error_logger:error_msg("Error while creating ~p: ~p~n", [TableName, Other]),
-            {error, Other}
-    end.
-
--spec add_table_copy_to_current_node(TableName :: atom()) -> ok | {error, any()}.
-add_table_copy_to_current_node(TableName) ->
-    CurrentNode = node(),
-    %% wait for table
-    mnesia:wait_for_tables([TableName], 10000),
-    %% add copy
-    case mnesia:add_table_copy(TableName, CurrentNode, ram_copies) of
-        {atomic, ok} ->
-            error_logger:info_msg("Copy of ~p was successfully added to current node~n", [TableName]),
-            ok;
-        {aborted, {already_exists, TableName}} ->
-            error_logger:info_msg("Copy of ~p is already added to current node~n", [TableName]),
-            ok;
-        {aborted, {already_exists, TableName, CurrentNode}} ->
-            error_logger:info_msg("Copy of ~p is already added to current node~n", [TableName]),
-            ok;
-        {aborted, Reason} ->
-            error_logger:error_msg("Error while creating copy of ~p: ~p~n", [TableName, Reason]),
-            {error, Reason}
-    end.

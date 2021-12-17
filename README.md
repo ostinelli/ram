@@ -1,5 +1,13 @@
 # Ram
-**Ram** is An ephemeral distributed KV store for Erlang and Elixir.
+**Ram** is an in-memory distributed KV store for Erlang and Elixir, able to automatically manage dynamic clusters
+(addition / removal of nodes) and to recover from net splits.
+
+Ram operations are **A**tomic (take effect on all nodes involved, or on none of the nodes),
+**C**onsistent (the data is the same across all nodes)
+and **I**solated (operations on different nodes in a network do not interfere with each other).
+They are not **D**urable since Ram is an in-memory only database. 
+
+Ram is an experiment and at an early development stage.
 
 ## Installation
 

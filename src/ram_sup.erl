@@ -48,7 +48,8 @@ start_link() ->
 init([]) ->
     %% build children
     Children = [
-        child_spec(ram_backbone)
+        child_spec(ram_backbone),
+        child_spec(ram_kv)
     ],
     %% return
     {ok, {{one_for_one, 10, 10}, Children}}.
