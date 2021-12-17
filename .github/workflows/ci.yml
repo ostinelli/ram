@@ -1,0 +1,26 @@
+on:
+  pull_request:
+    branches:
+      - "main"
+  push:
+    branches:
+      - "main"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: Tests on OTP ${{matrix.otp}} with rebar v${{matrix.rebar3}}
+    strategy:
+      matrix:
+        otp: ['24.1.2']
+        rebar3: ['3.17.0']
+    steps:
+      - uses: actions/checkout@v2
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{matrix.otp}}
+          rebar3-version: ${{matrix.rebar3}}
+      - name: Common Test tests
+        run: rebar3 ct --sname ct
+      - name: Dialyzer
+        run: rebar3 dialyzer

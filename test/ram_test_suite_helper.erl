@@ -97,8 +97,10 @@ start_slave(NodeShortName) ->
         {boot_timeout, 10},
         {erl_flags, "-connect_all false -kernel dist_auto_connect never"}
     ]),
-    %% add code path
-    CodePath = code:get_path(),
+    %% add code path to slaves
+    CodePath = CodePath = lists:filter(fun(Path) ->
+        nomatch =:= string:find(Path, "rebar3")
+    end, code:get_path()),
     true = rpc:call(Node, code, set_path, [CodePath]),
     %% return
     {ok, Node}.

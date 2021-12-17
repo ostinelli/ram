@@ -1,3 +1,5 @@
+![CI](https://github.com/ostinelli/ram/actions/workflows/ci.yml/badge.svg) [![Hex pm](https://img.shields.io/hexpm/v/ram.svg)](https://hex.pm/packages/ram)
+
 # Ram
 **Ram** is an in-memory distributed KV store for Erlang and Elixir, able to automatically manage dynamic clusters
 (addition / removal of nodes) and to recover from net splits.
