@@ -38,15 +38,13 @@
     handle_call/3,
     handle_cast/2,
     handle_info/2,
-    handle_continue/2,
     terminate/2,
     code_change/3
 ]).
 
 %% records
 -record(state, {
-    sync_requested = false :: boolean(),
-    sync_done = false :: boolean()
+    sync_requested = false :: boolean()
 }).
 
 %% includes
@@ -65,7 +63,7 @@ get(Key) ->
     global:trans({{?MODULE, Key}, self()},
         fun() ->
             case ets:lookup(?TABLE, Key) of
-                [] -> undefined;
+                [] -> {error, undefined};
                 [{Key, Value, Version}] -> {ok, Value, Version}
             end
         end).
@@ -97,10 +95,12 @@ delete(Key) ->
     ignore |
     {stop, Reason :: term()}.
 init([]) ->
+    %% monitor nodes
+    ok = net_kernel:monitor_nodes(true),
     %% empty local database
     true = ets:delete_all_objects(?TABLE),
     %% init
-    {ok, #state{}, {continue, after_init}}.
+    {ok, #state{}}.
 
 %% ----------------------------------------------------------------------------------------------------------
 %% Call messages
@@ -211,6 +211,17 @@ handle_info({'1.0', RemotePid, delete, Key}, State) ->
     %% return
     {noreply, State};
 
+handle_info({nodedown, RemoteNode}, State) ->
+    error_logger:info_msg("RAM[~s] Node ~s left the cluster", [node(), RemoteNode]),
+    {noreply, State};
+
+handle_info({nodeup, RemoteNode}, State) ->
+    error_logger:info_msg("RAM[~s] Node ~s joined the cluster", [node(), RemoteNode]),
+    %% send syn
+    {?MODULE, RemoteNode} ! {'1.0', self(), syn},
+    %% return
+    {noreply, State};
+
 handle_info({'1.0', RemotePid, syn}, State) ->
     error_logger:info_msg("RAM[~s] Received SYN from node ~s", [node(), node(RemotePid)]),
     %% reply
@@ -225,11 +236,6 @@ handle_info({'1.0', RemotePid, ack}, #state{sync_requested = false} = State) ->
     %% return
     {noreply, State#state{sync_requested = true}};
 
-handle_info({'1.0', RemotePid, ack}, State) ->
-    error_logger:info_msg("RAM[~s] Received ACK from node ~s", [node(), node(RemotePid)]),
-    %% return
-    {noreply, State};
-
 handle_info({'1.0', RemotePid, sync_req}, State) ->
     error_logger:info_msg("RAM[~s] Received SYNC_REQ from node ~s", [node(), node(RemotePid)]),
     %% send local data
@@ -241,26 +247,12 @@ handle_info({'1.0', RemotePid, sync_req}, State) ->
 handle_info({'1.0', RemotePid, sync, RemoteData}, State) ->
     error_logger:info_msg("RAM[~s] Received SYNC (~w entries) from node ~s", [node(), length(RemoteData), node(RemotePid)]),
     %% store data
-    true = ets:insert(?TABLE, RemoteData),
+    merge(RemoteData),
     %% return
     {noreply, State};
 
 handle_info(Info, State) ->
     error_logger:warning_msg("RAM[~s] Received an unknown info message: ~p", [node(), Info]),
-    {noreply, State}.
-
-%% ----------------------------------------------------------------------------------------------------------
-%% Continue messages
-%% ----------------------------------------------------------------------------------------------------------
--spec handle_continue(Info :: term(), #state{}) ->
-    {noreply, #state{}} |
-    {noreply, #state{}, timeout() | hibernate | {continue, term()}} |
-    {stop, Reason :: term(), #state{}}.
-handle_continue(after_init, State) ->
-    error_logger:info_msg("RAM[~s] Sending SYN to the cluster", [node()]),
-    lists:foreach(fun(RemoteNode) ->
-        {?MODULE, RemoteNode} ! {'1.0', self(), syn}
-    end, nodes()),
     {noreply, State}.
 
 %% ----------------------------------------------------------------------------------------------------------
@@ -301,3 +293,8 @@ receive_delete_ack(Key, Nodes) ->
 -spec generate_id() -> binary().
 generate_id() ->
     binary:encode_hex(crypto:hash(sha256, erlang:term_to_binary({node(), erlang:system_time()}))).
+
+-spec merge(RemoteData :: [ram_entry()]) -> any().
+merge(RemoteData) ->
+    %% TODO: loop for conflicts
+    true = ets:insert(?TABLE, RemoteData).
