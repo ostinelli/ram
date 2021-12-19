@@ -33,6 +33,9 @@
 
 %% tests
 -export([
+    one_node_operations/1
+]).
+-export([
     three_nodes_discover/1,
     three_nodes_operations/1
 ]).
@@ -54,6 +57,7 @@
 %% -------------------------------------------------------------------
 all() ->
     [
+        {group, one_node},
         {group, three_nodes}
     ].
 
@@ -71,6 +75,9 @@ all() ->
 %% -------------------------------------------------------------------
 groups() ->
     [
+        {one_node, [shuffle], [
+            one_node_operations
+        ]},
         {three_nodes, [shuffle], [
             three_nodes_discover,
             three_nodes_operations
@@ -149,6 +156,20 @@ end_per_testcase(_, _Config) ->
 %% ===================================================================
 %% Tests
 %% ===================================================================
+one_node_operations(_Config) ->
+    %% start ram
+    ok = ram:start(),
+
+    %% check
+    undefined = ram:get("key"),
+
+    %% put
+    ram:put("key", "value"),
+    "value" = ram:get("key"),
+
+    %% delete
+    ok =  ram:delete("key"),
+    undefined = ram:get("key").
 
 three_nodes_discover(Config) ->
     %% get slaves

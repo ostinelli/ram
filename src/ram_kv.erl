@@ -148,17 +148,15 @@ init([]) ->
     {noreply, #state{}, Timeout :: non_neg_integer()} |
     {stop, Reason :: term(), Reply :: term(), #state{}} |
     {stop, Reason :: term(), #state{}}.
-handle_call({put, Key, Value}, From, #state{nodes = Nodes} = State) ->
-    %% start
-    start_transaction(From, Nodes, insert, [{Key, Value}]),
-    %% return
-    {noreply, State};
+handle_call({put, Key, Value}, From, State) ->
+    Method = insert,
+    Params = [{Key, Value}],
+    apply_or_start_transaction(From, Method, Params, State);
 
-handle_call({delete, Key}, From, #state{nodes = Nodes} = State) ->
-    %% start
-    start_transaction(From, Nodes, delete, [Key]),
-    %% return
-    {noreply, State};
+handle_call({delete, Key}, From, State) ->
+    Method = delete,
+    Params = [Key],
+    apply_or_start_transaction(From, Method, Params, State);
 
 handle_call(subcluster_nodes, _From, #state{nodes = Nodes} = State) ->
     NodesList = ordsets:to_list(Nodes),
@@ -318,6 +316,21 @@ broadcast(Message, Nodes) ->
         {?MODULE, RemoteNode} ! Message
     end, undefined, Nodes).
 
+-spec apply_or_start_transaction(From :: term(), Method :: atom(), Params :: [term()], #state{}) ->
+    {noreply, #state{}} | {reply, ok, #state{}}.
+apply_or_start_transaction(From, Method, Params, #state{nodes = Nodes} = State) ->
+    case orddict:size(Nodes) of
+        0 ->
+            apply_to_ets(Method, Params),
+            {reply, ok, State};
+
+        _ ->
+            %% start
+            start_transaction(From, Nodes, Method, Params),
+            %% return
+            {noreply, State}
+    end.
+
 -spec start_transaction(From :: term(), Nodes :: [node()], Method :: atom(), Params :: [term()]) -> any().
 start_transaction(From, Nodes, Method, Params) ->
     %% prepare transaction
@@ -364,5 +377,9 @@ commit_transaction(Tid) ->
         [{Tid, _From, _Nodes, _RemainingNodes, TRef, Method, Params}] ->
             {ok, cancel} = timer:cancel(TRef),
             true = ets:delete(?TABLE_TRANSACTIONS, Tid),
-            apply(ets, Method, [?TABLE_STORE] ++ Params)
+            apply_to_ets(Method, Params)
     end.
+
+-spec apply_to_ets(Method :: atom(), Params :: [term()]) -> true.
+apply_to_ets(Method, Params) ->
+    apply(ets, Method, [?TABLE_STORE] ++ Params).
