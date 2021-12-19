@@ -29,6 +29,10 @@
 %% API
 -export([start_link/0]).
 -export([subcluster_nodes/0]).
+-export([get/2, fetch/1]).
+-export([put/2]).
+-export([update/3]).
+-export([delete/1]).
 
 %% gen_server callbacks
 -export([
@@ -41,13 +45,22 @@
     code_change/3
 ]).
 
+%% macros
+-define(TRANSACTION_TIMEOUT, 5000).
+
 %% records
 -record(state, {
-    nodes_map = #{} :: #{node() => pid()}
+    nodes = ordsets:new() :: ordsets:ordsets()
 }).
 
 %% includes
 -include("ram.hrl").
+
+- if (?OTP_RELEASE >= 23).
+-define(ETS_OPTIMIZATIONS, [{decentralized_counters, true}]).
+-else.
+-define(ETS_OPTIMIZATIONS, []).
+-endif.
 
 %% ===================================================================
 %% API
@@ -63,6 +76,48 @@ subcluster_nodes() ->
     catch exit:{noproc, {gen_server, call, _}} -> not_running
     end.
 
+-spec get(Key :: term(), Default :: term()) -> Value :: term().
+get(Key, Default) ->
+    case fetch(Key) of
+        error -> Default;
+        {ok, Value} -> Value
+    end.
+
+-spec fetch(Key :: term()) -> {ok, Value :: term()} | error.
+fetch(Key) ->
+    global:trans({{?MODULE, Key}, self()},
+        fun() ->
+            case ets:lookup(?TABLE_STORE, Key) of
+                [] -> error;
+                [{Key, Value}] -> {ok, Value}
+            end
+        end).
+
+-spec put(Key :: term(), Value :: term()) -> ok | {error, Reason :: term()}.
+put(Key, Value) ->
+    global:trans({{?MODULE, Key}, self()},
+        fun() ->
+            gen_server:call(?MODULE, {put, Key, Value})
+        end).
+
+-spec update(Key :: term(), Default :: term(), function()) -> ok.
+update(Key, Default, Fun) ->
+    global:trans({{?MODULE, Key}, self()},
+        fun() ->
+            Value = case ets:lookup(?TABLE_STORE, Key) of
+                [] -> Default;
+                [{Key, V}] -> Fun(V)
+            end,
+            gen_server:call(?MODULE, {put, Key, Value})
+        end).
+
+-spec delete(Key :: term()) -> ok.
+delete(Key) ->
+    global:trans({{?MODULE, Key}, self()},
+        fun() ->
+            gen_server:call(?MODULE, {delete, Key})
+        end).
+
 %% ===================================================================
 %% Callbacks
 %% ===================================================================
@@ -77,6 +132,9 @@ subcluster_nodes() ->
 init([]) ->
     %% monitor nodes
     ok = net_kernel:monitor_nodes(true),
+    %% create tables
+    ets:new(?TABLE_STORE, [set, protected, named_table, {read_concurrency, true}] ++ ?ETS_OPTIMIZATIONS),
+    ets:new(?TABLE_TRANSACTIONS, [set, protected, named_table, {read_concurrency, true}] ++ ?ETS_OPTIMIZATIONS),
     %% init
     {ok, #state{}, {continue, after_init}}.
 
@@ -90,11 +148,21 @@ init([]) ->
     {noreply, #state{}, Timeout :: non_neg_integer()} |
     {stop, Reason :: term(), Reply :: term(), #state{}} |
     {stop, Reason :: term(), #state{}}.
-handle_call(subcluster_nodes, _From, #state{
-    nodes_map = NodesMap
-} = State) ->
-    Nodes = maps:keys(NodesMap),
-    {reply, Nodes, State};
+handle_call({put, Key, Value}, From, #state{nodes = Nodes} = State) ->
+    %% start
+    start_transaction(From, Nodes, insert, [{Key, Value}]),
+    %% return
+    {noreply, State};
+
+handle_call({delete, Key}, From, #state{nodes = Nodes} = State) ->
+    %% start
+    start_transaction(From, Nodes, delete, [Key]),
+    %% return
+    {noreply, State};
+
+handle_call(subcluster_nodes, _From, #state{nodes = Nodes} = State) ->
+    NodesList = ordsets:to_list(Nodes),
+    {reply, NodesList, State};
 
 handle_call(Request, From, State) ->
     error_logger:warning_msg("RAM[~s] Received from ~p an unknown call message: ~p", [node(), From, Request]),
@@ -118,15 +186,43 @@ handle_cast(Msg, State) ->
     {noreply, #state{}} |
     {noreply, #state{}, Timeout :: non_neg_integer()} |
     {stop, Reason :: term(), #state{}}.
-handle_info({'1.0', syn, RemotePid}, #state{
-    nodes_map = NodesMap
-} = State) ->
+handle_info({'1.0', RemotePid, prepare_transaction, Tid, Method, Params}, State) ->
+    %% prepare transaction
+    prepare_transaction(Tid, Method, Params, undefined, []),
+    %% confirm
+    RemotePid ! {'1.0', self(), transaction_prepared, Tid},
+    %% return
+    {noreply, State};
+
+handle_info({'1.0', RemotePid, transaction_prepared, Tid}, #state{nodes = Nodes} = State) ->
+    %% check
+    case check_transaction_ready(Tid, node(RemotePid)) of
+        {ok, From} ->
+            %% commit
+            commit_transaction(Tid),
+            %% broadcast
+            _ = broadcast({'1.0', self(), commit_transaction, Tid}, Nodes),
+            %% reply
+            gen_server:reply(From, ok);
+
+        false ->
+            ok
+    end,
+    {noreply, State};
+
+handle_info({'1.0', _RemotePid, commit_transaction, Tid}, State) ->
+    %% commit
+    commit_transaction(Tid),
+    %% return
+    {noreply, State};
+
+handle_info({'1.0', RemotePid, syn}, #state{nodes = Nodes} = State) ->
     RemoteNode = node(RemotePid),
     error_logger:info_msg("RAM[~s] Received SYN from node ~s", [node(), RemoteNode]),
     %% reply
-    RemotePid ! {'1.0', ack, self()},
+    RemotePid ! {'1.0', self(), ack},
     %% is this a new node?
-    case maps:is_key(RemoteNode, NodesMap) of
+    case ordsets:is_element(RemoteNode, Nodes) of
         true ->
             %% already known, ignore
             {noreply, State};
@@ -134,16 +230,14 @@ handle_info({'1.0', syn, RemotePid}, #state{
         false ->
             %% monitor
             _MRef = monitor(process, RemotePid),
-            {noreply, State#state{nodes_map = NodesMap#{RemoteNode => RemotePid}}}
+            {noreply, State#state{nodes = ordsets:add_element(RemoteNode, Nodes)}}
     end;
 
-handle_info({'1.0', ack, RemotePid}, #state{
-    nodes_map = NodesMap
-} = State) ->
+handle_info({'1.0', RemotePid, ack}, #state{nodes = Nodes} = State) ->
     RemoteNode = node(RemotePid),
     error_logger:info_msg("RAM[~s] Received ACK from node ~s", [node(), RemoteNode]),
     %% is this a new node?
-    case maps:is_key(RemoteNode, NodesMap) of
+    case ordsets:is_element(RemoteNode, Nodes) of
         true ->
             %% already known
             {noreply, State};
@@ -152,20 +246,18 @@ handle_info({'1.0', ack, RemotePid}, #state{
             %% monitor
             _MRef = monitor(process, RemotePid),
             %% return
-            {noreply, State#state{nodes_map = NodesMap#{RemoteNode => RemotePid}}}
+            {noreply, State#state{nodes = ordsets:add_element(RemoteNode, Nodes)}}
     end;
 
-handle_info({'DOWN', _MRef, process, Pid, Reason}, #state{
-    nodes_map = NodesMap
-} = State) ->
+handle_info({'DOWN', _MRef, process, Pid, Reason}, #state{nodes = Nodes} = State) ->
     RemoteNode = node(Pid),
-    case maps:take(RemoteNode, NodesMap) of
-        {Pid, NodesMap1} ->
+    case ordsets:is_element(RemoteNode, Nodes) of
+        true ->
             error_logger:info_msg("RAM[~s] ram process is DOWN on node ~s: ~p", [node(), RemoteNode, Reason]),
-            {noreply, State#state{nodes_map = NodesMap1}};
+            Nodes1 = ordsets:del_element(RemoteNode, Nodes),
+            {noreply, State#state{nodes = Nodes1}};
 
-        error ->
-            %% relay to handler
+        _ ->
             error_logger:error_msg("RAM[~s] Received unknown DOWN message from process ~p on node ~s: ~p", [node(), Pid, Reason]),
             {noreply, State}
     end;
@@ -176,7 +268,10 @@ handle_info({nodedown, _Node}, State) ->
 
 handle_info({nodeup, RemoteNode}, State) ->
     error_logger:info_msg("RAM[~s] Node ~s has joined the cluster, sending SYN message", [node(), RemoteNode]),
-    {?MODULE, RemoteNode} ! {'1.0', syn, self()},
+    {?MODULE, RemoteNode} ! {'1.0', self(), syn},
+    {noreply, State};
+
+handle_info({transaction_timeout, Tid}, State) ->
     {noreply, State};
 
 handle_info(Info, State) ->
@@ -210,10 +305,64 @@ handle_continue(after_init, State) ->
     error_logger:info_msg("RAM[~s] Sending SYN to cluster", [node()]),
     %% broadcast
     lists:foreach(fun(RemoteNode) ->
-        {?MODULE, RemoteNode} ! {'1.0', syn, self()}
+        {?MODULE, RemoteNode} ! {'1.0', self(), syn}
     end, nodes()),
     {noreply, State}.
 
 %% ===================================================================
 %% Internal
 %% ===================================================================
+-spec broadcast(Message :: term(), Nodes :: [node()]) -> any().
+broadcast(Message, Nodes) ->
+    ordsets:fold(fun(RemoteNode, _) ->
+        {?MODULE, RemoteNode} ! Message
+    end, undefined, Nodes).
+
+-spec start_transaction(From :: term(), Nodes :: [node()], Method :: atom(), Params :: [term()]) -> any().
+start_transaction(From, Nodes, Method, Params) ->
+    %% prepare transaction
+    Tid = make_ref(),
+    _ = prepare_transaction(Tid, Method, Params, From, Nodes),
+    %% broadcast
+    _ = broadcast({'1.0', self(), prepare_transaction, Tid, Method, Params}, Nodes).
+
+-spec prepare_transaction(
+    Tid :: reference(),
+    Method :: atom(),
+    Params :: [term()],
+    From :: term(),
+    Nodes :: [node()]
+) -> true.
+prepare_transaction(Tid, Method, Params, From, Nodes) ->
+    {ok, TRef} = timer:send_after(?TRANSACTION_TIMEOUT, {transaction_timeout, Tid}),
+    ets:insert(?TABLE_TRANSACTIONS, {Tid, From, Nodes, Nodes, TRef, Method, Params}).
+
+-spec check_transaction_ready(Tid :: reference(), Node :: node()) -> {ok, From :: term()} | false.
+check_transaction_ready(Tid, Node) ->
+    case ets:lookup(?TABLE_TRANSACTIONS, Tid) of
+        [] ->
+            error_logger:error_msg("RAM[~s] Received confirmation for untracked transaction ~p", [Tid]),
+            false;
+
+        [{Tid, From, Nodes, RemainingNodes, TRef, Method, Params}] ->
+            case ordsets:del_element(Node, RemainingNodes) of
+                [] ->
+                    {ok, From};
+
+                RemainingNodes1 ->
+                    ets:insert(?TABLE_TRANSACTIONS, {Tid, From, Nodes, RemainingNodes1, TRef, Method, Params}),
+                    false
+            end
+    end.
+
+-spec commit_transaction(Tid :: reference()) -> any().
+commit_transaction(Tid) ->
+    case ets:lookup(?TABLE_TRANSACTIONS, Tid) of
+        [] ->
+            error_logger:error_msg("RAM[~s] Received commit for untracked transaction ~p", [Tid]);
+
+        [{Tid, _From, _Nodes, _RemainingNodes, TRef, Method, Params}] ->
+            {ok, cancel} = timer:cancel(TRef),
+            true = ets:delete(?TABLE_TRANSACTIONS, Tid),
+            apply(ets, Method, [?TABLE_STORE] ++ Params)
+    end.

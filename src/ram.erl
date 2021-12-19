@@ -28,7 +28,10 @@
 %% API
 -export([start/0, stop/0]).
 -export([subcluster_nodes/0]).
-
+-export([get/1, get/2, fetch/1]).
+-export([put/2]).
+-export([update/3]).
+-export([delete/1]).
 
 -spec start() -> ok.
 start() ->
@@ -42,3 +45,27 @@ stop() ->
 -spec subcluster_nodes() -> [node()] | not_running.
 subcluster_nodes() ->
     ram_kv:subcluster_nodes().
+
+-spec get(Key :: term()) -> Value :: term().
+get(Key) ->
+    get(Key, undefined).
+
+-spec get(Key :: term(), Default :: term()) -> Value :: term().
+get(Key, Default) ->
+    ram_kv:get(Key, Default).
+
+-spec fetch(Key :: term()) -> {ok, Value :: term()} | error.
+fetch(Key) ->
+    ram_kv:fetch(Key).
+
+-spec put(Key :: term(), Value :: term()) -> ok | {error, Reason :: term()}.
+put(Key, Value) ->
+    ram_kv:put(Key, Value).
+
+-spec update(Key :: term(), Default :: term(), function()) -> ok.
+update(Key, Default, Fun) ->
+    ram_kv:update(Key, Default, Fun).
+
+-spec delete(Key :: term()) -> ok.
+delete(Key) ->
+    ram_kv:delete(Key).

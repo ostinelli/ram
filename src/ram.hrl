@@ -23,16 +23,20 @@
 %% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 %% THE SOFTWARE.
 %% ==========================================================================================================
--define(TABLE, ram_data_table).
+-define(TABLE_STORE, ram_store).
+-define(TABLE_TRANSACTIONS, ram_transactions).
 
--record(?TABLE, {
-    key = undefined :: term(),
-    value = undefined :: term(),
-    version = undefined :: term()
+-record(?TABLE_STORE, {
+    key :: term(),
+    value :: term()
 }).
 
--type ram_entry() :: {
-    Key :: term(),
-    Value :: term(),
-    Version :: term()
-}.
+-record(?TABLE_TRANSACTIONS, {
+    tid :: reference(),
+    requester :: term(),
+    nodes :: ordsets:ordsets(),
+    remaining_nodes :: [node()],
+    timer_ref :: reference(),
+    method :: atom(),
+    params :: [term()]
+}).

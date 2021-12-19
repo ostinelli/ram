@@ -33,7 +33,8 @@
 
 %% tests
 -export([
-    three_nodes_discover/1
+    three_nodes_discover/1,
+    three_nodes_operations/1
 ]).
 
 %% include
@@ -71,7 +72,8 @@ all() ->
 groups() ->
     [
         {three_nodes, [shuffle], [
-            three_nodes_discover
+            three_nodes_discover,
+            three_nodes_operations
         ]}
     ].
 %% -------------------------------------------------------------------
@@ -225,3 +227,61 @@ three_nodes_discover(Config) ->
     ram_test_suite_helper:assert_subcluster(node(), [SlaveNode2]),
     ram_test_suite_helper:assert_subcluster(SlaveNode1, undefined),
     ram_test_suite_helper:assert_subcluster(SlaveNode2, [node()]).
+
+three_nodes_operations(Config) ->
+    %% get slaves
+    SlaveNode1 = proplists:get_value(ram_slave_1, Config),
+    SlaveNode2 = proplists:get_value(ram_slave_2, Config),
+
+    %% start ram
+    ok = ram:start(),
+    ok = rpc:call(SlaveNode1, ram, start, []),
+    ok = rpc:call(SlaveNode2, ram, start, []),
+
+    %% check
+    error = ram:fetch("key"),
+    undefined = ram:get("key"),
+    default = ram:get("key", default),
+    undefined = rpc:call(SlaveNode1, ram, get, ["key"]),
+    undefined = rpc:call(SlaveNode2, ram, get, ["key"]),
+
+    %% put
+    ram:put("key", "value"),
+
+    %% check
+    {ok, "value"} = ram:fetch("key"),
+    "value" = ram:get("key"),
+    "value" = ram:get("key", default),
+    "value" = ram:get("key"),
+    "value" = rpc:call(SlaveNode1, ram, get, ["key"]),
+    "value" = rpc:call(SlaveNode2, ram, get, ["key"]),
+
+    %% delete
+    ok = rpc:call(SlaveNode1, ram, delete, ["key"]),
+    ok = rpc:call(SlaveNode1, ram, delete, ["key"]),
+
+    %% check
+    error = ram:fetch("key"),
+    undefined = ram:get("key"),
+    default = ram:get("key", default),
+    undefined = rpc:call(SlaveNode1, ram, get, ["key"]),
+    undefined = rpc:call(SlaveNode2, ram, get, ["key"]),
+
+    ComplexKey = {key, self()},
+
+    %% update
+    UpdateFun = fun(ExistingValue) -> ExistingValue * 2 end,
+    ok = ram:update(ComplexKey, 10, UpdateFun),
+
+    %% check
+    10 = ram:get(ComplexKey),
+    10 = rpc:call(SlaveNode1, ram, get, [ComplexKey]),
+    10 = rpc:call(SlaveNode2, ram, get, [ComplexKey]),
+
+    %% update
+    ok = ram:update(ComplexKey, 10, UpdateFun),
+
+    %% check
+    20 = ram:get(ComplexKey),
+    20 = rpc:call(SlaveNode1, ram, get, [ComplexKey]),
+    20 = rpc:call(SlaveNode2, ram, get, [ComplexKey]).
