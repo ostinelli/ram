@@ -35,6 +35,7 @@
 -export([wait_cluster_mesh_connected/1]).
 -export([wait_process_name_ready/1]).
 -export([assert_cluster/2]).
+-export([assert_subcluster/2]).
 -export([assert_received_messages/1]).
 -export([assert_empty_queue/0]).
 -export([assert_wait/2]).
@@ -225,6 +226,20 @@ assert_cluster(Node, ExpectedNodes, StartAt) ->
         _ -> ok
     end.
 
+assert_subcluster(Node, ExpectedNodes) ->
+    assert_subcluster(Node, ExpectedNodes, os:system_time(millisecond)).
+assert_subcluster(Node, ExpectedNodes, StartAt) ->
+    case rpc:call(Node, ram, subcluster_nodes, []) of
+        not_running ->
+            undefined;
+
+        Nodes ->
+            case do_assert_cluster(Nodes, ExpectedNodes, StartAt) of
+                continue -> assert_subcluster(Node, ExpectedNodes, StartAt);
+                _ -> ok
+            end
+    end.
+
 assert_received_messages(Messages) ->
     assert_received_messages(Messages, []).
 assert_received_messages([], UnexpectedMessages) ->
@@ -301,7 +316,6 @@ process_main() ->
         _ ->
             process_main()
     end.
-
 
 do_assert_cluster(Nodes, ExpectedNodes, StartAt) ->
     ExpectedCount = length(ExpectedNodes),

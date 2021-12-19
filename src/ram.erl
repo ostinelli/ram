@@ -27,9 +27,8 @@
 
 %% API
 -export([start/0, stop/0]).
--export([get/1]).
--export([put/2, put/3]).
--export([delete/1]).
+-export([subcluster_nodes/0]).
+
 
 -spec start() -> ok.
 start() ->
@@ -40,18 +39,6 @@ start() ->
 stop() ->
     application:stop(ram).
 
--spec get(Key :: term()) -> Value :: term().
-get(Key) ->
-    ram_kv:get(Key).
-
--spec put(Key :: term(), Value :: term()) -> ok | {error, Reason :: term()}.
-put(Key, Value) ->
-    ram_kv:put(Key, Value, undefined).
-
--spec put(Key :: term(), Value :: term(), Version :: term()) -> ok | {error, Reason :: term()}.
-put(Key, Value, Version) ->
-    ram_kv:put(Key, Value, Version).
-
--spec delete(Key :: term()) -> ok.
-delete(Key) ->
-    ram_kv:delete(Key).
+-spec subcluster_nodes() -> [node()] | not_running.
+subcluster_nodes() ->
+    ram_kv:subcluster_nodes().

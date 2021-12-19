@@ -48,22 +48,14 @@ start_link() ->
 init([]) ->
     %% build children
     Children = [
-        child_spec(ram_backbone),
-        child_spec(ram_kv)
+        #{
+            id => ram_kv,
+            start => {ram_kv, start_link, []},
+            type => worker,
+            shutdown => 10000,
+            restart => permanent,
+            modules => [ram_kv]
+        }
     ],
     %% return
     {ok, {{one_for_one, 10, 10}, Children}}.
-
-%% ===================================================================
-%% Internals
-%% ===================================================================
--spec child_spec(Module :: module()) -> supervisor:child_spec().
-child_spec(Module) ->
-    #{
-        id => Module,
-        start => {Module, start_link, []},
-        type => worker,
-        shutdown => 10000,
-        restart => permanent,
-        modules => [Module]
-    }.

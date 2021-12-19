@@ -28,9 +28,7 @@
 
 %% API
 -export([start_link/0]).
--export([get/1]).
--export([put/3]).
--export([delete/1]).
+-export([subcluster_nodes/0]).
 
 %% gen_server callbacks
 -export([
@@ -38,17 +36,14 @@
     handle_call/3,
     handle_cast/2,
     handle_info/2,
+    handle_continue/2,
     terminate/2,
     code_change/3
 ]).
 
-%% internals
--export([do_put/3]).
--export([do_delete/1]).
-
 %% records
 -record(state, {
-    sync_requested = false :: boolean()
+    nodes_map = #{} :: #{node() => pid()}
 }).
 
 %% includes
@@ -62,29 +57,11 @@ start_link() ->
     Options = [],
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], Options).
 
--spec get(Key :: term()) -> Value :: term().
-get(Key) ->
-    global:trans({{?MODULE, Key}, self()},
-        fun() ->
-            case ets:lookup(?TABLE, Key) of
-                [] -> {error, undefined};
-                [{Key, Value, Version}] -> {ok, Value, Version}
-            end
-        end).
-
--spec put(Key :: term(), Value :: term(), Version :: term()) -> ok | {error, Reason :: term()}.
-put(Key, Value, Version) ->
-    global:trans({{?MODULE, Key}, self()},
-        fun() ->
-            gen_server:call(?MODULE, {put, Key, Value, Version})
-        end).
-
--spec delete(Key :: term()) -> ok.
-delete(Key) ->
-    global:trans({{?MODULE, Key}, self()},
-        fun() ->
-            gen_server:call(?MODULE, {delete, Key})
-        end).
+-spec subcluster_nodes() -> [node()] | not_running.
+subcluster_nodes() ->
+    try gen_server:call(?MODULE, subcluster_nodes)
+    catch exit:{noproc, {gen_server, call, _}} -> not_running
+    end.
 
 %% ===================================================================
 %% Callbacks
@@ -95,16 +72,13 @@ delete(Key) ->
 %% ----------------------------------------------------------------------------------------------------------
 -spec init([]) ->
     {ok, #state{}} |
-    {ok, #state{}, Timeout :: non_neg_integer()} |
-    ignore |
-    {stop, Reason :: term()}.
+    {ok, #state{}, timeout() | hibernate | {continue, term()}} |
+    {stop, Reason :: term()} | ignore.
 init([]) ->
     %% monitor nodes
     ok = net_kernel:monitor_nodes(true),
-    %% empty local database
-    true = ets:delete_all_objects(?TABLE),
     %% init
-    {ok, #state{}}.
+    {ok, #state{}, {continue, after_init}}.
 
 %% ----------------------------------------------------------------------------------------------------------
 %% Call messages
@@ -116,94 +90,15 @@ init([]) ->
     {noreply, #state{}, Timeout :: non_neg_integer()} |
     {stop, Reason :: term(), Reply :: term(), #state{}} |
     {stop, Reason :: term(), #state{}}.
-handle_call({put, Key, Value, Version}, From, State) ->
-    {VersionMatch, TableObject} = case ets:lookup(?TABLE, Key) of
-        [] ->
-            case Version of
-                undefined -> {ok, undefined};
-                _ -> {{error, deleted}, undefined}
-            end;
-        [{_, _, Version} = TableObject0] ->
-            {ok, TableObject0};
-
-        _ ->
-            {{error, outdated}, undefined}
-    end,
-    case VersionMatch of
-        ok ->
-            spawn_link(fun() ->
-                Nodes = [node() | nodes()],
-                Version1 = generate_id(),
-                %% send
-                Res0 = lists:foldl(fun(RemoteNode, Acc) ->
-                    [rpc:call(RemoteNode, ?MODULE, do_put, [Key, Value, Version1]) | Acc]
-                end, [], Nodes),
-                ResSet = sets:from_list(Res0),
-                Res = sets:to_list(ResSet),
-                case Res of
-                    [ok] ->
-                        %% reply
-                        gen_server:reply(From, {ok, Version1});
-
-                    _ ->
-                        %% revert
-                        case TableObject of
-                            {Key0, Value0, Version} ->
-                                lists:foreach(fun(RemoteNode) ->
-                                    rpc:call(RemoteNode, ?MODULE, do_put, [Key0, Value0, Version])
-                                end, Nodes);
-
-                            undefined ->
-                                lists:foreach(fun(RemoteNode) ->
-                                    rpc:call(RemoteNode, ?MODULE, do_delete, [Key])
-                                end, Nodes)
-                        end,
-                        %% reply
-                        gen_server:reply(From, {error, transaction_failed})
-                end
-            end),
-            %% return
-            {noreply, State};
-
-        {error, Reason} ->
-            {reply, {error, Reason}, State}
-    end;
-
-handle_call({delete, Key}, From, State) ->
-    case ets:lookup(?TABLE, Key) of
-        [] ->
-            {reply, {error, undefined}, State};
-
-        [{_, Value0, Version0}] ->
-            spawn_link(fun() ->
-                Nodes = [node() | nodes()],
-                %% send
-                Res0 = lists:foldl(fun(RemoteNode, Acc) ->
-                    [rpc:call(RemoteNode, ?MODULE, do_delete, [Key]) | Acc]
-                end, [], Nodes),
-                ResSet = sets:from_list(Res0),
-                Res = sets:to_list(ResSet),
-                case Res of
-                    [ok] ->
-                        %% reply
-                        gen_server:reply(From, ok);
-
-                    _ ->
-                        %% revert
-                        lists:foreach(fun(RemoteNode) ->
-                            rpc:call(RemoteNode, ?MODULE, do_put, [Key, Value0, Version0])
-                        end, Nodes),
-                        %% reply
-                        gen_server:reply(From, {error, transaction_failed})
-                end
-            end),
-            %% return
-            {noreply, State}
-    end;
+handle_call(subcluster_nodes, _From, #state{
+    nodes_map = NodesMap
+} = State) ->
+    Nodes = maps:keys(NodesMap),
+    {reply, Nodes, State};
 
 handle_call(Request, From, State) ->
     error_logger:warning_msg("RAM[~s] Received from ~p an unknown call message: ~p", [node(), From, Request]),
-    {reply, undefined, State}.
+    {noreply, State}.
 
 %% ----------------------------------------------------------------------------------------------------------
 %% Cast messages
@@ -223,44 +118,65 @@ handle_cast(Msg, State) ->
     {noreply, #state{}} |
     {noreply, #state{}, Timeout :: non_neg_integer()} |
     {stop, Reason :: term(), #state{}}.
-handle_info({nodedown, RemoteNode}, State) ->
-    error_logger:info_msg("RAM[~s] Node ~s left the cluster", [node(), RemoteNode]),
+handle_info({'1.0', syn, RemotePid}, #state{
+    nodes_map = NodesMap
+} = State) ->
+    RemoteNode = node(RemotePid),
+    error_logger:info_msg("RAM[~s] Received SYN from node ~s", [node(), RemoteNode]),
+    %% reply
+    RemotePid ! {'1.0', ack, self()},
+    %% is this a new node?
+    case maps:is_key(RemoteNode, NodesMap) of
+        true ->
+            %% already known, ignore
+            {noreply, State};
+
+        false ->
+            %% monitor
+            _MRef = monitor(process, RemotePid),
+            {noreply, State#state{nodes_map = NodesMap#{RemoteNode => RemotePid}}}
+    end;
+
+handle_info({'1.0', ack, RemotePid}, #state{
+    nodes_map = NodesMap
+} = State) ->
+    RemoteNode = node(RemotePid),
+    error_logger:info_msg("RAM[~s] Received ACK from node ~s", [node(), RemoteNode]),
+    %% is this a new node?
+    case maps:is_key(RemoteNode, NodesMap) of
+        true ->
+            %% already known
+            {noreply, State};
+
+        false ->
+            %% monitor
+            _MRef = monitor(process, RemotePid),
+            %% return
+            {noreply, State#state{nodes_map = NodesMap#{RemoteNode => RemotePid}}}
+    end;
+
+handle_info({'DOWN', _MRef, process, Pid, Reason}, #state{
+    nodes_map = NodesMap
+} = State) ->
+    RemoteNode = node(Pid),
+    case maps:take(RemoteNode, NodesMap) of
+        {Pid, NodesMap1} ->
+            error_logger:info_msg("RAM[~s] ram process is DOWN on node ~s: ~p", [node(), RemoteNode, Reason]),
+            {noreply, State#state{nodes_map = NodesMap1}};
+
+        error ->
+            %% relay to handler
+            error_logger:error_msg("RAM[~s] Received unknown DOWN message from process ~p on node ~s: ~p", [node(), Pid, Reason]),
+            {noreply, State}
+    end;
+
+handle_info({nodedown, _Node}, State) ->
+    %% ignore (wait for down message)
     {noreply, State};
 
 handle_info({nodeup, RemoteNode}, State) ->
-    error_logger:info_msg("RAM[~s] Node ~s joined the cluster", [node(), RemoteNode]),
-    %% send syn
-    {?MODULE, RemoteNode} ! {'1.0', self(), syn},
-    %% return
-    {noreply, State};
-
-handle_info({'1.0', RemotePid, syn}, State) ->
-    error_logger:info_msg("RAM[~s] Received SYN from node ~s", [node(), node(RemotePid)]),
-    %% reply
-    RemotePid ! {'1.0', self(), ack},
-    %% return
-    {noreply, State};
-
-handle_info({'1.0', RemotePid, ack}, #state{sync_requested = false} = State) ->
-    error_logger:info_msg("RAM[~s] Received ACK from node ~s, sending SYNC_REQ", [node(), node(RemotePid)]),
-    %% request data
-    RemotePid ! {'1.0', self(), sync_req},
-    %% return
-    {noreply, State#state{sync_requested = true}};
-
-handle_info({'1.0', RemotePid, sync_req}, State) ->
-    error_logger:info_msg("RAM[~s] Received SYNC_REQ from node ~s", [node(), node(RemotePid)]),
-    %% send local data
-    LocalData = ets:tab2list(?TABLE),
-    RemotePid ! {'1.0', self(), sync, LocalData},
-    %% return
-    {noreply, State};
-
-handle_info({'1.0', RemotePid, sync, RemoteData}, State) ->
-    error_logger:info_msg("RAM[~s] Received SYNC (~w entries) from node ~s", [node(), length(RemoteData), node(RemotePid)]),
-    %% store data
-    merge(RemoteData),
-    %% return
+    error_logger:info_msg("RAM[~s] Node ~s has joined the cluster, sending SYN message", [node(), RemoteNode]),
+    {?MODULE, RemoteNode} ! {'1.0', syn, self()},
     {noreply, State};
 
 handle_info(Info, State) ->
@@ -283,24 +199,21 @@ terminate(Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+%% ----------------------------------------------------------------------------------------------------------
+%% Continue messages
+%% ----------------------------------------------------------------------------------------------------------
+-spec handle_continue(Info :: term(), #state{}) ->
+    {noreply, #state{}} |
+    {noreply, #state{}, timeout() | hibernate | {continue, term()}} |
+    {stop, Reason :: term(), #state{}}.
+handle_continue(after_init, State) ->
+    error_logger:info_msg("RAM[~s] Sending SYN to cluster", [node()]),
+    %% broadcast
+    lists:foreach(fun(RemoteNode) ->
+        {?MODULE, RemoteNode} ! {'1.0', syn, self()}
+    end, nodes()),
+    {noreply, State}.
+
 %% ===================================================================
 %% Internal
 %% ===================================================================
--spec do_put(Key :: term(), Value :: term(), Version :: term()) -> ok.
-do_put(Key, Value, Version) ->
-    true = ets:insert(?TABLE, {Key, Value, Version}),
-    ok.
-
--spec do_delete(Key :: term()) -> ok.
-do_delete(Key) ->
-    true = ets:delete(?TABLE, Key),
-    ok.
-
--spec generate_id() -> binary().
-generate_id() ->
-    binary:encode_hex(crypto:hash(sha256, erlang:term_to_binary({node(), erlang:system_time()}))).
-
--spec merge(RemoteData :: [ram_entry()]) -> any().
-merge(RemoteData) ->
-    %% TODO: loop for conflicts
-    true = ets:insert(?TABLE, RemoteData).
