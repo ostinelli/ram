@@ -40,3 +40,8 @@
     method :: atom(),
     params :: [term()]
 }).
+
+-type ram_entry() :: {
+    Key :: term(),
+    Value :: term()
+}.

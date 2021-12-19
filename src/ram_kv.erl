@@ -217,8 +217,8 @@ handle_info({'1.0', _RemotePid, commit_transaction, Tid}, State) ->
 handle_info({'1.0', RemotePid, syn}, #state{nodes = Nodes} = State) ->
     RemoteNode = node(RemotePid),
     error_logger:info_msg("RAM[~s] Received SYN from node ~s", [node(), RemoteNode]),
-    %% reply
-    RemotePid ! {'1.0', self(), ack},
+    %% send local entries to remote
+    RemotePid ! {'1.0', self(), ack, all_local_entries()},
     %% is this a new node?
     case ordsets:is_element(RemoteNode, Nodes) of
         true ->
@@ -231,9 +231,11 @@ handle_info({'1.0', RemotePid, syn}, #state{nodes = Nodes} = State) ->
             {noreply, State#state{nodes = ordsets:add_element(RemoteNode, Nodes)}}
     end;
 
-handle_info({'1.0', RemotePid, ack}, #state{nodes = Nodes} = State) ->
+handle_info({'1.0', RemotePid, ack, RemoteEntries}, #state{nodes = Nodes} = State) ->
     RemoteNode = node(RemotePid),
-    error_logger:info_msg("RAM[~s] Received ACK from node ~s", [node(), RemoteNode]),
+    error_logger:info_msg("RAM[~s] Received ACK from node ~s with ~w entries", [node(), RemoteNode, length(RemoteEntries)]),
+    %% save remote entries to local
+    merge(RemoteEntries),
     %% is this a new node?
     case ordsets:is_element(RemoteNode, Nodes) of
         true ->
@@ -243,6 +245,8 @@ handle_info({'1.0', RemotePid, ack}, #state{nodes = Nodes} = State) ->
         false ->
             %% monitor
             _MRef = monitor(process, RemotePid),
+            %% send local entries to remote
+            RemotePid ! {'1.0', self(), ack, all_local_entries()},
             %% return
             {noreply, State#state{nodes = ordsets:add_element(RemoteNode, Nodes)}}
     end;
@@ -270,6 +274,7 @@ handle_info({nodeup, RemoteNode}, State) ->
     {noreply, State};
 
 handle_info({transaction_timeout, Tid}, State) ->
+    %% TODO: handle timeouts
     {noreply, State};
 
 handle_info(Info, State) ->
@@ -300,12 +305,19 @@ code_change(_OldVsn, State, _Extra) ->
     {noreply, #state{}, timeout() | hibernate | {continue, term()}} |
     {stop, Reason :: term(), #state{}}.
 handle_continue(after_init, State) ->
-    error_logger:info_msg("RAM[~s] Sending SYN to cluster", [node()]),
-    %% broadcast
-    lists:foreach(fun(RemoteNode) ->
-        {?MODULE, RemoteNode} ! {'1.0', self(), syn}
-    end, nodes()),
-    {noreply, State}.
+    case nodes() of
+        [] ->
+            error_logger:info_msg("RAM[~s] Running on single node"),
+            {noreply, State};
+
+        Nodes ->
+            error_logger:info_msg("RAM[~s] Sending SYN to cluster", [node()]),
+            %% broadcast
+            lists:foreach(fun(RemoteNode) ->
+                {?MODULE, RemoteNode} ! {'1.0', self(), syn}
+            end, Nodes),
+            {noreply, State}
+    end.
 
 %% ===================================================================
 %% Internal
@@ -383,3 +395,12 @@ commit_transaction(Tid) ->
 -spec apply_to_ets(Method :: atom(), Params :: [term()]) -> true.
 apply_to_ets(Method, Params) ->
     apply(ets, Method, [?TABLE_STORE] ++ Params).
+
+-spec all_local_entries() -> [ram_entry()].
+all_local_entries() ->
+    ets:tab2list(?TABLE_STORE).
+
+-spec merge([ram_entry()]) -> any().
+merge(RemoteEntries) ->
+    %% TODO: manage conflicts
+    ets:insert(?TABLE_STORE, RemoteEntries).

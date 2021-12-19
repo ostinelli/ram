@@ -37,7 +37,9 @@
 ]).
 -export([
     three_nodes_discover/1,
-    three_nodes_operations/1
+    three_nodes_operations/1,
+    three_nodes_cluster_changes/1
+
 ]).
 
 %% include
@@ -80,7 +82,8 @@ groups() ->
         ]},
         {three_nodes, [shuffle], [
             three_nodes_discover,
-            three_nodes_operations
+            three_nodes_operations,
+            three_nodes_cluster_changes
         ]}
     ].
 %% -------------------------------------------------------------------
@@ -273,7 +276,6 @@ three_nodes_operations(Config) ->
     {ok, "value"} = ram:fetch("key"),
     "value" = ram:get("key"),
     "value" = ram:get("key", default),
-    "value" = ram:get("key"),
     "value" = rpc:call(SlaveNode1, ram, get, ["key"]),
     "value" = rpc:call(SlaveNode2, ram, get, ["key"]),
 
@@ -306,3 +308,45 @@ three_nodes_operations(Config) ->
     20 = ram:get(ComplexKey),
     20 = rpc:call(SlaveNode1, ram, get, [ComplexKey]),
     20 = rpc:call(SlaveNode2, ram, get, [ComplexKey]).
+
+three_nodes_cluster_changes(Config) ->
+    %% get slaves
+    SlaveNode1 = proplists:get_value(ram_slave_1, Config),
+    SlaveNode2 = proplists:get_value(ram_slave_2, Config),
+
+    %% disconnect master from node 1 from 2
+    rpc:call(SlaveNode1, ram_test_suite_helper, disconnect_node, [SlaveNode2]),
+
+    %% start ram on nodes
+    ok = ram:start(),
+    ok = rpc:call(SlaveNode1, ram, start, []),
+    ok = rpc:call(SlaveNode2, ram, start, []),
+    ram_test_suite_helper:assert_subcluster(node(), [SlaveNode1, SlaveNode2]),
+    ram_test_suite_helper:assert_subcluster(SlaveNode1, [node()]),
+    ram_test_suite_helper:assert_subcluster(SlaveNode2, [node()]),
+
+    ok = rpc:call(SlaveNode1, ram, put, ["key-on-1", "value-on-1"]),
+    ok = rpc:call(SlaveNode2, ram, put, ["key-on-2", "value-on-2"]),
+    %% check
+    "value-on-1" = ram:get("key-on-1"),
+    "value-on-2" = ram:get("key-on-2"),
+    "value-on-1" = rpc:call(SlaveNode1, ram, get, ["key-on-1"]),
+    undefined = rpc:call(SlaveNode1, ram, get, ["key-on-2"]),
+    undefined = rpc:call(SlaveNode2, ram, get, ["key-on-1"]),
+    "value-on-2" = rpc:call(SlaveNode2, ram, get, ["key-on-2"]),
+
+    %% reconnect all
+    rpc:call(SlaveNode1, ram_test_suite_helper, connect_node, [SlaveNode2]),
+    ram_test_suite_helper:assert_cluster(node(), [SlaveNode1, SlaveNode2]),
+    ram_test_suite_helper:assert_cluster(SlaveNode1, [node(), SlaveNode2]),
+    ram_test_suite_helper:assert_cluster(SlaveNode2, [node(), SlaveNode1]),
+
+    timer:sleep(2000),
+
+    %% check
+    "value-on-1" = ram:get("key-on-1"),
+    "value-on-2" = ram:get("key-on-2"),
+    "value-on-1" = rpc:call(SlaveNode1, ram, get, ["key-on-1"]),
+    "value-on-2" = rpc:call(SlaveNode1, ram, get, ["key-on-2"]),
+    "value-on-1" = rpc:call(SlaveNode2, ram, get, ["key-on-1"]),
+    "value-on-2" = rpc:call(SlaveNode2, ram, get, ["key-on-2"]).
