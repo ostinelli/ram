@@ -42,8 +42,8 @@
     three_nodes_discover/1,
     three_nodes_operations/1,
     three_nodes_cluster_changes/1,
-    three_nodes_transaction_fail/1
-
+    three_nodes_transaction_fail/1,
+    three_nodes_conflicts_default_resolution/1
 ]).
 
 %% include
@@ -92,7 +92,8 @@ groups() ->
             three_nodes_discover,
             three_nodes_operations,
             three_nodes_cluster_changes,
-            three_nodes_transaction_fail
+            three_nodes_transaction_fail,
+            three_nodes_conflicts_default_resolution
         ]}
     ].
 %% -------------------------------------------------------------------
@@ -120,19 +121,19 @@ end_per_suite(_Config) ->
 %% Config0 = Config1 = [tuple()]
 %% Reason = any()
 %% -------------------------------------------------------------------
-init_per_group(three_nodes, Config) ->
-    case ram_test_suite_helper:init_cluster(3) of
+init_per_group(two_nodes, Config) ->
+    case ram_test_suite_helper:init_cluster(2) of
         {error_initializing_cluster, Other} ->
-            end_per_group(three_nodes, Config),
+            end_per_group(two_nodes, Config),
             {skip, Other};
 
         NodesConfig ->
             NodesConfig ++ Config
     end;
-init_per_group(two_nodes, Config) ->
-    case ram_test_suite_helper:init_cluster(2) of
+init_per_group(three_nodes, Config) ->
+    case ram_test_suite_helper:init_cluster(3) of
         {error_initializing_cluster, Other} ->
-            end_per_group(two_nodes, Config),
+            end_per_group(three_nodes, Config),
             {skip, Other};
 
         NodesConfig ->
@@ -147,10 +148,10 @@ init_per_group(_GroupName, Config) ->
 %% GroupName = atom()
 %% Config0 = Config1 = [tuple()]
 %% -------------------------------------------------------------------
-end_per_group(three_nodes, Config) ->
-    ram_test_suite_helper:end_cluster(3, Config);
 end_per_group(two_nodes, Config) ->
     ram_test_suite_helper:end_cluster(2, Config);
+end_per_group(three_nodes, Config) ->
+    ram_test_suite_helper:end_cluster(3, Config);
 end_per_group(_GroupName, _Config) ->
     ram_test_suite_helper:clean_after_test().
 
@@ -432,9 +433,45 @@ three_nodes_transaction_fail(Config) ->
     ),
     ram_test_suite_helper:assert_wait(
         [],
-        fun() -> rpc:call(SlaveNode1, ets,tab2list, [?TABLE_TRANSACTIONS]) end
+        fun() -> rpc:call(SlaveNode1, ets, tab2list, [?TABLE_TRANSACTIONS]) end
     ),
     ram_test_suite_helper:assert_wait(
         [],
-        fun() -> rpc:call(SlaveNode2, ets,tab2list, [?TABLE_TRANSACTIONS]) end
+        fun() -> rpc:call(SlaveNode2, ets, tab2list, [?TABLE_TRANSACTIONS]) end
     ).
+
+three_nodes_conflicts_default_resolution(Config) ->
+    %% get slaves
+    SlaveNode1 = proplists:get_value(ram_slave_1, Config),
+    SlaveNode2 = proplists:get_value(ram_slave_2, Config),
+
+    %% disconnect node 1 from 2
+    rpc:call(SlaveNode1, ram_test_suite_helper, disconnect_node, [SlaveNode2]),
+
+    %% start ram on nodes
+    ok = ram:start(),
+    ok = rpc:call(SlaveNode1, ram, start, []),
+    ok = rpc:call(SlaveNode2, ram, start, []),
+    ram_test_suite_helper:assert_subcluster(node(), [SlaveNode1, SlaveNode2]),
+    ram_test_suite_helper:assert_subcluster(SlaveNode1, [node()]),
+    ram_test_suite_helper:assert_subcluster(SlaveNode2, [node()]),
+
+    %% put
+    ok = rpc:call(SlaveNode1, ram, put, ["common-key", "value-on-1"]),
+    ok = rpc:call(SlaveNode2, ram, put, ["common-key", "value-on-2"]),
+
+    %% check
+    "value-on-2" = ram:get("common-key"),
+    "value-on-1" = rpc:call(SlaveNode1, ram, get, ["common-key"]),
+    "value-on-2" = rpc:call(SlaveNode2, ram, get, ["common-key"]),
+
+    %% reconnect all
+    rpc:call(SlaveNode1, ram_test_suite_helper, connect_node, [SlaveNode2]),
+    ram_test_suite_helper:assert_cluster(node(), [SlaveNode1, SlaveNode2]),
+    ram_test_suite_helper:assert_cluster(SlaveNode1, [node(), SlaveNode2]),
+    ram_test_suite_helper:assert_cluster(SlaveNode2, [node(), SlaveNode1]),
+
+    %% check
+    "value-on-2" = ram:get("common-key"),
+    "value-on-2" = rpc:call(SlaveNode1, ram, get, ["common-key"]),
+    "value-on-2" = rpc:call(SlaveNode2, ram, get, ["common-key"]).

@@ -86,7 +86,7 @@ fetch(Key) ->
     lock(Key, fun() ->
         case ets:lookup(?TABLE_STORE, Key) of
             [] -> error;
-            [{Key, Value}] -> {ok, Value}
+            [{Key, Value, _Time}] -> {ok, Value}
         end
     end).
 
@@ -94,7 +94,7 @@ fetch(Key) ->
 put(Key, Value) ->
     lock(Key, fun() ->
         Method = insert,
-        Params = [{Key, Value}],
+        Params = [{Key, Value, erlang:system_time()}],
         transaction_call(Method, Params)
     end).
 
@@ -103,10 +103,10 @@ update(Key, Default, Fun) ->
     lock(Key, fun() ->
         Value = case ets:lookup(?TABLE_STORE, Key) of
             [] -> Default;
-            [{Key, V}] -> Fun(V)
+            [{Key, V, _Time}] -> Fun(V)
         end,
         Method = insert,
-        Params = [{Key, Value}],
+        Params = [{Key, Value, erlang:system_time()}],
         transaction_call(Method, Params)
     end).
 
@@ -231,7 +231,7 @@ handle_info({'1.0', RemotePid, ack, RemoteEntries}, State) ->
     RemoteNode = node(RemotePid),
     error_logger:info_msg("RAM[~s] Received ACK from node ~s with ~w entries", [node(), RemoteNode, length(RemoteEntries)]),
     %% save remote entries to local
-    merge(RemoteEntries),
+    merge(RemoteNode, RemoteEntries),
     %% is this a new node?
     Nodes = get_subcluster_nodes(),
     case ordsets:is_element(RemoteNode, Nodes) of
@@ -367,7 +367,23 @@ apply_to_ets(Method, Params) ->
 all_local_entries() ->
     ets:tab2list(?TABLE_STORE).
 
--spec merge([ram_entry()]) -> any().
-merge(RemoteEntries) ->
-    %% TODO: manage conflicts
-    ets:insert(?TABLE_STORE, RemoteEntries).
+-spec merge(RemoteNode :: node(), [ram_entry()]) -> any().
+merge(_RemoteNode, []) -> ok;
+merge(RemoteNode, [{Key, RemoteValue, RemoteTime} | RemoteEntries]) ->
+    case ets:lookup(?TABLE_STORE, Key) of
+        [] ->
+            %% key not local, insert
+            ets:insert(?TABLE_STORE, {Key, RemoteValue, RemoteTime});
+
+        [{Key, LocalValue, LocalTime}] ->
+            %% conflict
+            case ram_event_handler:do_resolve_conflict(
+                Key,
+                {node(), LocalValue, LocalTime},
+                {RemoteNode, RemoteValue, RemoteTime}
+            ) of
+                {ok, ValueToKeep} -> ets:insert(?TABLE_STORE, {Key, ValueToKeep, erlang:system_time()});
+                error -> ets:delete(?TABLE_STORE, Key)
+            end
+    end,
+    merge(RemoteNode, RemoteEntries).
