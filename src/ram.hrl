@@ -25,6 +25,7 @@
 %% ==========================================================================================================
 -define(TABLE_STORE, ram_store).
 -define(TABLE_TRANSACTIONS, ram_transactions).
+-define(TABLE_SHARED, ram_shared).
 
 -type ram_entry() :: {
     Key :: term(),

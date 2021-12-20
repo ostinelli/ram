@@ -36,6 +36,9 @@
     one_node_operations/1
 ]).
 -export([
+    two_nodes_only_one_active/1
+]).
+-export([
     three_nodes_discover/1,
     three_nodes_operations/1,
     three_nodes_cluster_changes/1,
@@ -61,6 +64,7 @@
 all() ->
     [
         {group, one_node},
+        {group, two_nodes},
         {group, three_nodes}
     ].
 
@@ -80,6 +84,9 @@ groups() ->
     [
         {one_node, [shuffle], [
             one_node_operations
+        ]},
+        {two_nodes, [shuffle], [
+            two_nodes_only_one_active
         ]},
         {three_nodes, [shuffle], [
             three_nodes_discover,
@@ -122,7 +129,15 @@ init_per_group(three_nodes, Config) ->
         NodesConfig ->
             NodesConfig ++ Config
     end;
+init_per_group(two_nodes, Config) ->
+    case ram_test_suite_helper:init_cluster(2) of
+        {error_initializing_cluster, Other} ->
+            end_per_group(two_nodes, Config),
+            {skip, Other};
 
+        NodesConfig ->
+            NodesConfig ++ Config
+    end;
 init_per_group(_GroupName, Config) ->
     Config.
 
@@ -134,6 +149,8 @@ init_per_group(_GroupName, Config) ->
 %% -------------------------------------------------------------------
 end_per_group(three_nodes, Config) ->
     ram_test_suite_helper:end_cluster(3, Config);
+end_per_group(two_nodes, Config) ->
+    ram_test_suite_helper:end_cluster(2, Config);
 end_per_group(_GroupName, _Config) ->
     ram_test_suite_helper:clean_after_test().
 
@@ -163,6 +180,21 @@ end_per_testcase(_, _Config) ->
 %% ===================================================================
 one_node_operations(_Config) ->
     %% start ram
+    ok = ram:start(),
+
+    %% check
+    undefined = ram:get("key"),
+
+    %% put
+    ram:put("key", "value"),
+    "value" = ram:get("key"),
+
+    %% delete
+    ok = ram:delete("key"),
+    undefined = ram:get("key").
+
+two_nodes_only_one_active(_Config) ->
+    %% start ram only on main
     ok = ram:start(),
 
     %% check
@@ -394,6 +426,15 @@ three_nodes_transaction_fail(Config) ->
     {'EXIT', {{commit_timeout, {bad_nodes, [SlaveNode1]}}, _}} = (catch ram:delete("key-to-delete")),
 
     %% check temp contents
-    [] = ets:tab2list(?TABLE_TRANSACTIONS),
-    [] = rpc:call(SlaveNode1, ets, tab2list, [?TABLE_TRANSACTIONS]),
-    [] = rpc:call(SlaveNode2, ets, tab2list, [?TABLE_TRANSACTIONS]).
+    ram_test_suite_helper:assert_wait(
+        [],
+        fun() -> ets:tab2list(?TABLE_TRANSACTIONS) end
+    ),
+    ram_test_suite_helper:assert_wait(
+        [],
+        fun() -> rpc:call(SlaveNode1, ets,tab2list, [?TABLE_TRANSACTIONS]) end
+    ),
+    ram_test_suite_helper:assert_wait(
+        [],
+        fun() -> rpc:call(SlaveNode2, ets,tab2list, [?TABLE_TRANSACTIONS]) end
+    ).

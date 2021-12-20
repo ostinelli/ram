@@ -49,9 +49,7 @@
 -define(TRANSACTION_TIMEOUT, 5000).
 
 %% records
--record(state, {
-    nodes = ordsets:new() :: ordsets:ordsets()
-}).
+-record(state, {}).
 
 %% includes
 -include("ram.hrl").
@@ -72,8 +70,8 @@ start_link() ->
 
 -spec subcluster_nodes() -> [node()] | not_running.
 subcluster_nodes() ->
-    try gen_server:call(?MODULE, subcluster_nodes)
-    catch exit:{noproc, {gen_server, call, _}} -> not_running
+    try ordsets:to_list(get_subcluster_nodes())
+    catch error:badarg -> not_running
     end.
 
 -spec get(Key :: term(), Default :: term()) -> Value :: term().
@@ -85,52 +83,52 @@ get(Key, Default) ->
 
 -spec fetch(Key :: term()) -> {ok, Value :: term()} | error.
 fetch(Key) ->
-    global:trans({{?MODULE, Key}, self()},
-        fun() ->
-            case ets:lookup(?TABLE_STORE, Key) of
-                [] -> error;
-                [{Key, Value}] -> {ok, Value}
-            end
-        end).
+    lock(Key, fun() ->
+        case ets:lookup(?TABLE_STORE, Key) of
+            [] -> error;
+            [{Key, Value}] -> {ok, Value}
+        end
+    end).
 
 -spec put(Key :: term(), Value :: term()) -> ok.
 put(Key, Value) ->
-    global:trans({{?MODULE, Key}, self()},
-        fun() ->
-            Method = insert,
-            Params = [{Key, Value}],
-            transaction_call(Method, Params)
-        end).
+    lock(Key, fun() ->
+        Method = insert,
+        Params = [{Key, Value}],
+        transaction_call(Method, Params)
+    end).
 
 -spec update(Key :: term(), Default :: term(), function()) -> ok.
 update(Key, Default, Fun) ->
-    global:trans({{?MODULE, Key}, self()},
-        fun() ->
-            Value = case ets:lookup(?TABLE_STORE, Key) of
-                [] -> Default;
-                [{Key, V}] -> Fun(V)
-            end,
-            Method = insert,
-            Params = [{Key, Value}],
-            transaction_call(Method, Params)
-        end).
+    lock(Key, fun() ->
+        Value = case ets:lookup(?TABLE_STORE, Key) of
+            [] -> Default;
+            [{Key, V}] -> Fun(V)
+        end,
+        Method = insert,
+        Params = [{Key, Value}],
+        transaction_call(Method, Params)
+    end).
 
 -spec delete(Key :: term()) -> ok.
 delete(Key) ->
-    global:trans({{?MODULE, Key}, self()},
-        fun() ->
-            Method = delete,
-            Params = [Key],
-            case ets:lookup(?TABLE_STORE, Key) of
-                [] -> ok;
-                _-> transaction_call(Method, Params)
-            end
-        end).
+    lock(Key, fun() ->
+        Method = delete,
+        Params = [Key],
+        case ets:lookup(?TABLE_STORE, Key) of
+            [] -> ok;
+            _ -> transaction_call(Method, Params)
+        end
+    end).
+
+-spec lock(Key :: term(), Fun :: function()) -> any().
+lock(Key, Fun) ->
+    global:trans({{?MODULE, Key}, self()}, Fun, subcluster_nodes()).
 
 -spec transaction_call(Method :: atom(), Params :: [term()]) -> ok.
 transaction_call(Method, Params) ->
     Tid = make_ref(),
-    Nodes = [node() | nodes()],
+    Nodes = [node() | subcluster_nodes()],
     case gen_server:multi_call(Nodes, ?MODULE, {'1.0', prepare_transaction, Tid, Method, Params}, ?TRANSACTION_TIMEOUT) of
         {_Replies, []} ->
             %% everyone replied -> send confirmation (wait for call response to unlock the transaction)
@@ -160,6 +158,7 @@ init([]) ->
     %% create tables
     ets:new(?TABLE_STORE, [set, protected, named_table, {read_concurrency, true}] ++ ?ETS_OPTIMIZATIONS),
     ets:new(?TABLE_TRANSACTIONS, [set, protected, named_table, {read_concurrency, true}] ++ ?ETS_OPTIMIZATIONS),
+    ets:new(?TABLE_SHARED, [set, protected, named_table, {read_concurrency, true}] ++ ?ETS_OPTIMIZATIONS),
     %% init
     {ok, #state{}, {continue, after_init}}.
 
@@ -185,10 +184,6 @@ handle_call({'1.0', commit_transaction, Tid}, _From, State) ->
     %% return
     {reply, ok, State};
 
-handle_call(subcluster_nodes, _From, #state{nodes = Nodes} = State) ->
-    NodesList = ordsets:to_list(Nodes),
-    {reply, NodesList, State};
-
 handle_call(Request, From, State) ->
     error_logger:warning_msg("RAM[~s] Received from ~p an unknown call message: ~p", [node(), From, Request]),
     {noreply, State}.
@@ -211,12 +206,13 @@ handle_cast(Msg, State) ->
     {noreply, #state{}} |
     {noreply, #state{}, Timeout :: non_neg_integer()} |
     {stop, Reason :: term(), #state{}}.
-handle_info({'1.0', RemotePid, syn}, #state{nodes = Nodes} = State) ->
+handle_info({'1.0', RemotePid, syn}, State) ->
     RemoteNode = node(RemotePid),
     error_logger:info_msg("RAM[~s] Received SYN from node ~s", [node(), RemoteNode]),
     %% send local entries to remote
     RemotePid ! {'1.0', self(), ack, all_local_entries()},
     %% is this a new node?
+    Nodes = get_subcluster_nodes(),
     case ordsets:is_element(RemoteNode, Nodes) of
         true ->
             %% already known, ignore
@@ -225,15 +221,19 @@ handle_info({'1.0', RemotePid, syn}, #state{nodes = Nodes} = State) ->
         false ->
             %% monitor
             _MRef = monitor(process, RemotePid),
-            {noreply, State#state{nodes = ordsets:add_element(RemoteNode, Nodes)}}
+            %% store new node
+            _ = set_subcluster_nodes(ordsets:add_element(RemoteNode, Nodes)),
+            %% return
+            {noreply, State}
     end;
 
-handle_info({'1.0', RemotePid, ack, RemoteEntries}, #state{nodes = Nodes} = State) ->
+handle_info({'1.0', RemotePid, ack, RemoteEntries}, State) ->
     RemoteNode = node(RemotePid),
     error_logger:info_msg("RAM[~s] Received ACK from node ~s with ~w entries", [node(), RemoteNode, length(RemoteEntries)]),
     %% save remote entries to local
     merge(RemoteEntries),
     %% is this a new node?
+    Nodes = get_subcluster_nodes(),
     case ordsets:is_element(RemoteNode, Nodes) of
         true ->
             %% already known
@@ -244,17 +244,20 @@ handle_info({'1.0', RemotePid, ack, RemoteEntries}, #state{nodes = Nodes} = Stat
             _MRef = monitor(process, RemotePid),
             %% send local entries to remote
             RemotePid ! {'1.0', self(), ack, all_local_entries()},
+            %% store new node
+            _ = set_subcluster_nodes(ordsets:add_element(RemoteNode, Nodes)),
             %% return
-            {noreply, State#state{nodes = ordsets:add_element(RemoteNode, Nodes)}}
+            {noreply, State}
     end;
 
-handle_info({'DOWN', _MRef, process, Pid, Reason}, #state{nodes = Nodes} = State) ->
+handle_info({'DOWN', _MRef, process, Pid, Reason}, State) ->
     RemoteNode = node(Pid),
+    Nodes = get_subcluster_nodes(),
     case ordsets:is_element(RemoteNode, Nodes) of
         true ->
             error_logger:info_msg("RAM[~s] ram process is DOWN on node ~s: ~p", [node(), RemoteNode, Reason]),
-            Nodes1 = ordsets:del_element(RemoteNode, Nodes),
-            {noreply, State#state{nodes = Nodes1}};
+            _ = set_subcluster_nodes(ordsets:del_element(RemoteNode, Nodes)),
+            {noreply, State};
 
         _ ->
             error_logger:error_msg("RAM[~s] Received unknown DOWN message from process ~p on node ~s: ~p", [node(), Pid, Reason]),
@@ -320,6 +323,17 @@ handle_continue(after_init, State) ->
 %% ===================================================================
 %% Internal
 %% ===================================================================
+-spec get_subcluster_nodes() -> Nodes :: ordsets:ordset().
+get_subcluster_nodes() ->
+    case ets:lookup(?TABLE_SHARED, subcluster_nodes) of
+        [] -> ordsets:new();
+        [{_, Nodes}] -> Nodes
+    end.
+
+-spec set_subcluster_nodes(Nodes :: ordsets:ordset()) -> true.
+set_subcluster_nodes(Nodes) ->
+    true = ets:insert(?TABLE_SHARED, {subcluster_nodes, Nodes}).
+
 -spec prepare_transaction(
     Tid :: reference(),
     Method :: atom(),
