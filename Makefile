@@ -37,3 +37,11 @@ else
 	ct_run -dir $(PROJECT_DIR)/test -logdir $(PROJECT_DIR)/test/results \
 	-pa `rebar3 as test path`
 endif
+
+bench: compile_test
+	@erl -pa `rebar3 as test path` \
+	-pa `rebar3 as test path`/../test \
+	-name ram_bench_master@127.0.0.1 \
+	-noshell \
+	+P 5000000 \
+	-eval 'ram_benchmark:start().'
