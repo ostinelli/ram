@@ -58,7 +58,7 @@ get(Key, Default) ->
 fetch(Key) ->
     ram_kv:fetch(Key).
 
--spec put(Key :: term(), Value :: term()) -> ok | {error, Reason :: term()}.
+-spec put(Key :: term(), Value :: term()) -> ok.
 put(Key, Value) ->
     ram_kv:put(Key, Value).
 

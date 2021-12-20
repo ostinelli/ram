@@ -26,21 +26,6 @@
 -define(TABLE_STORE, ram_store).
 -define(TABLE_TRANSACTIONS, ram_transactions).
 
--record(?TABLE_STORE, {
-    key :: term(),
-    value :: term()
-}).
-
--record(?TABLE_TRANSACTIONS, {
-    tid :: reference(),
-    requester :: term(),
-    nodes :: ordsets:ordsets(),
-    remaining_nodes :: [node()],
-    timer_ref :: reference(),
-    method :: atom(),
-    params :: [term()]
-}).
-
 -type ram_entry() :: {
     Key :: term(),
     Value :: term()

@@ -93,11 +93,13 @@ fetch(Key) ->
             end
         end).
 
--spec put(Key :: term(), Value :: term()) -> ok | {error, Reason :: term()}.
+-spec put(Key :: term(), Value :: term()) -> ok.
 put(Key, Value) ->
     global:trans({{?MODULE, Key}, self()},
         fun() ->
-            gen_server:call(?MODULE, {put, Key, Value})
+            Method = insert,
+            Params = [{Key, Value}],
+            transaction_call(Method, Params)
         end).
 
 -spec update(Key :: term(), Default :: term(), function()) -> ok.
@@ -108,15 +110,35 @@ update(Key, Default, Fun) ->
                 [] -> Default;
                 [{Key, V}] -> Fun(V)
             end,
-            gen_server:call(?MODULE, {put, Key, Value})
+            Method = insert,
+            Params = [{Key, Value}],
+            transaction_call(Method, Params)
         end).
 
 -spec delete(Key :: term()) -> ok.
 delete(Key) ->
     global:trans({{?MODULE, Key}, self()},
         fun() ->
-            gen_server:call(?MODULE, {delete, Key})
+            Method = delete,
+            Params = [Key],
+            transaction_call(Method, Params)
         end).
+
+-spec transaction_call(Method :: atom(), Params :: [term()]) -> ok.
+transaction_call(Method, Params) ->
+    Tid = make_ref(),
+    Nodes = [node() | nodes()],
+    case gen_server:multi_call(Nodes, ?MODULE, {'1.0', prepare_transaction, Tid, Method, Params}) of
+        {_Replies, []} ->
+            %% everyone replied -> send confirmation (wait for call response to unlock the transaction)
+            _ = gen_server:multi_call(Nodes, ?MODULE, {'1.0', commit_transaction, Tid}),
+            %% return
+            ok;
+
+        {_Replies, BadNodes} ->
+            %% not everyone replied
+            error({commit_timeout, {bad_nodes, BadNodes}})
+    end.
 
 %% ===================================================================
 %% Callbacks
@@ -148,15 +170,17 @@ init([]) ->
     {noreply, #state{}, Timeout :: non_neg_integer()} |
     {stop, Reason :: term(), Reply :: term(), #state{}} |
     {stop, Reason :: term(), #state{}}.
-handle_call({put, Key, Value}, From, State) ->
-    Method = insert,
-    Params = [{Key, Value}],
-    apply_or_start_transaction(From, Method, Params, State);
+handle_call({'1.0', prepare_transaction, Tid, Method, Params}, _From, State) ->
+    %% prepare transaction
+    prepare_transaction(Tid, Method, Params),
+    %% return
+    {reply, ok, State};
 
-handle_call({delete, Key}, From, State) ->
-    Method = delete,
-    Params = [Key],
-    apply_or_start_transaction(From, Method, Params, State);
+handle_call({'1.0', commit_transaction, Tid}, _From, State) ->
+    %% commit
+    commit_transaction(Tid),
+    %% return
+    {reply, ok, State};
 
 handle_call(subcluster_nodes, _From, #state{nodes = Nodes} = State) ->
     NodesList = ordsets:to_list(Nodes),
@@ -184,36 +208,6 @@ handle_cast(Msg, State) ->
     {noreply, #state{}} |
     {noreply, #state{}, Timeout :: non_neg_integer()} |
     {stop, Reason :: term(), #state{}}.
-handle_info({'1.0', RemotePid, prepare_transaction, Tid, Method, Params}, State) ->
-    %% prepare transaction
-    prepare_transaction(Tid, Method, Params, undefined, []),
-    %% confirm
-    RemotePid ! {'1.0', self(), transaction_prepared, Tid},
-    %% return
-    {noreply, State};
-
-handle_info({'1.0', RemotePid, transaction_prepared, Tid}, #state{nodes = Nodes} = State) ->
-    %% check
-    case check_transaction_ready(Tid, node(RemotePid)) of
-        {ok, From} ->
-            %% commit
-            commit_transaction(Tid),
-            %% broadcast
-            _ = broadcast({'1.0', self(), commit_transaction, Tid}, Nodes),
-            %% reply
-            gen_server:reply(From, ok);
-
-        false ->
-            ok
-    end,
-    {noreply, State};
-
-handle_info({'1.0', _RemotePid, commit_transaction, Tid}, State) ->
-    %% commit
-    commit_transaction(Tid),
-    %% return
-    {noreply, State};
-
 handle_info({'1.0', RemotePid, syn}, #state{nodes = Nodes} = State) ->
     RemoteNode = node(RemotePid),
     error_logger:info_msg("RAM[~s] Received SYN from node ~s", [node(), RemoteNode]),
@@ -307,7 +301,7 @@ code_change(_OldVsn, State, _Extra) ->
 handle_continue(after_init, State) ->
     case nodes() of
         [] ->
-            error_logger:info_msg("RAM[~s] Running on single node"),
+            error_logger:info_msg("RAM[~s] Running on single node", [node()]),
             {noreply, State};
 
         Nodes ->
@@ -322,63 +316,14 @@ handle_continue(after_init, State) ->
 %% ===================================================================
 %% Internal
 %% ===================================================================
--spec broadcast(Message :: term(), Nodes :: [node()]) -> any().
-broadcast(Message, Nodes) ->
-    ordsets:fold(fun(RemoteNode, _) ->
-        {?MODULE, RemoteNode} ! Message
-    end, undefined, Nodes).
-
--spec apply_or_start_transaction(From :: term(), Method :: atom(), Params :: [term()], #state{}) ->
-    {noreply, #state{}} | {reply, ok, #state{}}.
-apply_or_start_transaction(From, Method, Params, #state{nodes = Nodes} = State) ->
-    case orddict:size(Nodes) of
-        0 ->
-            apply_to_ets(Method, Params),
-            {reply, ok, State};
-
-        _ ->
-            %% start
-            start_transaction(From, Nodes, Method, Params),
-            %% return
-            {noreply, State}
-    end.
-
--spec start_transaction(From :: term(), Nodes :: [node()], Method :: atom(), Params :: [term()]) -> any().
-start_transaction(From, Nodes, Method, Params) ->
-    %% prepare transaction
-    Tid = make_ref(),
-    _ = prepare_transaction(Tid, Method, Params, From, Nodes),
-    %% broadcast
-    _ = broadcast({'1.0', self(), prepare_transaction, Tid, Method, Params}, Nodes).
-
 -spec prepare_transaction(
     Tid :: reference(),
     Method :: atom(),
-    Params :: [term()],
-    From :: term(),
-    Nodes :: [node()]
+    Params :: [term()]
 ) -> true.
-prepare_transaction(Tid, Method, Params, From, Nodes) ->
+prepare_transaction(Tid, Method, Params) ->
     {ok, TRef} = timer:send_after(?TRANSACTION_TIMEOUT, {transaction_timeout, Tid}),
-    ets:insert(?TABLE_TRANSACTIONS, {Tid, From, Nodes, Nodes, TRef, Method, Params}).
-
--spec check_transaction_ready(Tid :: reference(), Node :: node()) -> {ok, From :: term()} | false.
-check_transaction_ready(Tid, Node) ->
-    case ets:lookup(?TABLE_TRANSACTIONS, Tid) of
-        [] ->
-            error_logger:error_msg("RAM[~s] Received confirmation for untracked transaction ~p", [Tid]),
-            false;
-
-        [{Tid, From, Nodes, RemainingNodes, TRef, Method, Params}] ->
-            case ordsets:del_element(Node, RemainingNodes) of
-                [] ->
-                    {ok, From};
-
-                RemainingNodes1 ->
-                    ets:insert(?TABLE_TRANSACTIONS, {Tid, From, Nodes, RemainingNodes1, TRef, Method, Params}),
-                    false
-            end
-    end.
+    ets:insert(?TABLE_TRANSACTIONS, {Tid, TRef, Method, Params}).
 
 -spec commit_transaction(Tid :: reference()) -> any().
 commit_transaction(Tid) ->
@@ -386,7 +331,7 @@ commit_transaction(Tid) ->
         [] ->
             error_logger:error_msg("RAM[~s] Received commit for untracked transaction ~p", [Tid]);
 
-        [{Tid, _From, _Nodes, _RemainingNodes, TRef, Method, Params}] ->
+        [{Tid, TRef, Method, Params}] ->
             {ok, cancel} = timer:cancel(TRef),
             true = ets:delete(?TABLE_TRANSACTIONS, Tid),
             apply_to_ets(Method, Params)
