@@ -121,14 +121,17 @@ delete(Key) ->
         fun() ->
             Method = delete,
             Params = [Key],
-            transaction_call(Method, Params)
+            case ets:lookup(?TABLE_STORE, Key) of
+                [] -> ok;
+                _-> transaction_call(Method, Params)
+            end
         end).
 
 -spec transaction_call(Method :: atom(), Params :: [term()]) -> ok.
 transaction_call(Method, Params) ->
     Tid = make_ref(),
     Nodes = [node() | nodes()],
-    case gen_server:multi_call(Nodes, ?MODULE, {'1.0', prepare_transaction, Tid, Method, Params}) of
+    case gen_server:multi_call(Nodes, ?MODULE, {'1.0', prepare_transaction, Tid, Method, Params}, ?TRANSACTION_TIMEOUT) of
         {_Replies, []} ->
             %% everyone replied -> send confirmation (wait for call response to unlock the transaction)
             _ = gen_server:multi_call(Nodes, ?MODULE, {'1.0', commit_transaction, Tid}),
@@ -268,7 +271,8 @@ handle_info({nodeup, RemoteNode}, State) ->
     {noreply, State};
 
 handle_info({transaction_timeout, Tid}, State) ->
-    %% TODO: handle timeouts
+    error_logger:info_msg("RAM[~s] Transaction ~p timed out, removing from temp", [node(), Tid]),
+    remove_transaction_from_temp(Tid),
     {noreply, State};
 
 handle_info(Info, State) ->
@@ -333,9 +337,13 @@ commit_transaction(Tid) ->
 
         [{Tid, TRef, Method, Params}] ->
             {ok, cancel} = timer:cancel(TRef),
-            true = ets:delete(?TABLE_TRANSACTIONS, Tid),
+            remove_transaction_from_temp(Tid),
             apply_to_ets(Method, Params)
     end.
+
+-spec remove_transaction_from_temp(Tid :: reference()) -> true.
+remove_transaction_from_temp(Tid) ->
+    true = ets:delete(?TABLE_TRANSACTIONS, Tid).
 
 -spec apply_to_ets(Method :: atom(), Params :: [term()]) -> true.
 apply_to_ets(Method, Params) ->

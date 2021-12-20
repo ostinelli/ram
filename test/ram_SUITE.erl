@@ -38,7 +38,8 @@
 -export([
     three_nodes_discover/1,
     three_nodes_operations/1,
-    three_nodes_cluster_changes/1
+    three_nodes_cluster_changes/1,
+    three_nodes_transaction_fail/1
 
 ]).
 
@@ -83,7 +84,8 @@ groups() ->
         {three_nodes, [shuffle], [
             three_nodes_discover,
             three_nodes_operations,
-            three_nodes_cluster_changes
+            three_nodes_cluster_changes,
+            three_nodes_transaction_fail
         ]}
     ].
 %% -------------------------------------------------------------------
@@ -171,7 +173,7 @@ one_node_operations(_Config) ->
     "value" = ram:get("key"),
 
     %% delete
-    ok =  ram:delete("key"),
+    ok = ram:delete("key"),
     undefined = ram:get("key").
 
 three_nodes_discover(Config) ->
@@ -314,7 +316,7 @@ three_nodes_cluster_changes(Config) ->
     SlaveNode1 = proplists:get_value(ram_slave_1, Config),
     SlaveNode2 = proplists:get_value(ram_slave_2, Config),
 
-    %% disconnect master from node 1 from 2
+    %% disconnect node 1 from 2
     rpc:call(SlaveNode1, ram_test_suite_helper, disconnect_node, [SlaveNode2]),
 
     %% start ram on nodes
@@ -325,8 +327,10 @@ three_nodes_cluster_changes(Config) ->
     ram_test_suite_helper:assert_subcluster(SlaveNode1, [node()]),
     ram_test_suite_helper:assert_subcluster(SlaveNode2, [node()]),
 
+    %% put
     ok = rpc:call(SlaveNode1, ram, put, ["key-on-1", "value-on-1"]),
     ok = rpc:call(SlaveNode2, ram, put, ["key-on-2", "value-on-2"]),
+
     %% check
     "value-on-1" = ram:get("key-on-1"),
     "value-on-2" = ram:get("key-on-2"),
@@ -341,8 +345,6 @@ three_nodes_cluster_changes(Config) ->
     ram_test_suite_helper:assert_cluster(SlaveNode1, [node(), SlaveNode2]),
     ram_test_suite_helper:assert_cluster(SlaveNode2, [node(), SlaveNode1]),
 
-    timer:sleep(2000),
-
     %% check
     "value-on-1" = ram:get("key-on-1"),
     "value-on-2" = ram:get("key-on-2"),
@@ -350,3 +352,48 @@ three_nodes_cluster_changes(Config) ->
     "value-on-2" = rpc:call(SlaveNode1, ram, get, ["key-on-2"]),
     "value-on-1" = rpc:call(SlaveNode2, ram, get, ["key-on-1"]),
     "value-on-2" = rpc:call(SlaveNode2, ram, get, ["key-on-2"]).
+
+three_nodes_transaction_fail(Config) ->
+    %% get slaves
+    SlaveNode1 = proplists:get_value(ram_slave_1, Config),
+    SlaveNode2 = proplists:get_value(ram_slave_2, Config),
+
+    %% start ram
+    ok = ram:start(),
+    ok = rpc:call(SlaveNode1, ram, start, []),
+    ok = rpc:call(SlaveNode2, ram, start, []),
+    ram_test_suite_helper:assert_subcluster(node(), [SlaveNode1, SlaveNode2]),
+    ram_test_suite_helper:assert_subcluster(SlaveNode1, [node(), SlaveNode2]),
+    ram_test_suite_helper:assert_subcluster(SlaveNode2, [node(), SlaveNode1]),
+
+    %% put
+    ok = ram:put("key-to-delete", "value-to-delete"),
+
+    %% suspend ram on 1
+    ok = rpc:call(SlaveNode1, sys, suspend, [ram_kv]),
+
+    %% get transaction errors
+    {'EXIT', {{commit_timeout, {bad_nodes, [SlaveNode1]}}, _}} = (catch ram:put("key", "value")),
+    {'EXIT', {{commit_timeout, {bad_nodes, [SlaveNode1]}}, _}} = (catch ram:update(
+        "key",
+        "value",
+        fun(ExistingValue) -> ExistingValue * 2 end)
+    ),
+
+    %% check
+    undefined = ram:get("key"),
+    undefined = rpc:call(SlaveNode1, ram, get, ["key"]),
+    undefined = rpc:call(SlaveNode2, ram, get, ["key"]),
+
+    %% delete with no previous key
+    ok = ram:delete("key"),
+    ok = rpc:call(SlaveNode1, ram, delete, ["key"]),
+    ok = rpc:call(SlaveNode2, ram, delete, ["key"]),
+
+    %% delete with existing previous key
+    {'EXIT', {{commit_timeout, {bad_nodes, [SlaveNode1]}}, _}} = (catch ram:delete("key-to-delete")),
+
+    %% check temp contents
+    [] = ets:tab2list(?TABLE_TRANSACTIONS),
+    [] = rpc:call(SlaveNode1, ets, tab2list, [?TABLE_TRANSACTIONS]),
+    [] = rpc:call(SlaveNode2, ets, tab2list, [?TABLE_TRANSACTIONS]).
