@@ -23,6 +23,7 @@
 %% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 %% THE SOFTWARE.
 %% ==========================================================================================================
+%% @private
 -module(ram_kv).
 -behaviour(gen_server).
 

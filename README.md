@@ -9,7 +9,7 @@ Ram operations are **A**tomic (take effect on all nodes involved, or on none of 
 and **I**solated (operations on different nodes in a network do not interfere with each other).
 They are not **D**urable since Ram is an in-memory only database. 
 
-Ram is an experiment and at an early development stage.
+Ram is at an early development stage.
 
 ## Installation
 
