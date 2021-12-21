@@ -36,7 +36,7 @@
 -export([wait_process_name_ready/1]).
 -export([assert_cluster/2]).
 -export([assert_subcluster/2]).
--export([assert_received_messages/1]).
+-export([assert_received_messages/1, assert_received_messages/2]).
 -export([assert_empty_queue/0]).
 -export([assert_wait/2]).
 -export([send_error_logger_to_disk/0]).
@@ -46,7 +46,6 @@
 
 %% macro
 -define(DEFAULT_WAIT_TIMEOUT, 5000).
--define(UNEXPECTED_MESSAGES_WAIT_TIMEOUT, 1000).
 
 %% ===================================================================
 %% API
@@ -241,29 +240,31 @@ assert_subcluster(Node, ExpectedNodes, StartAt) ->
     end.
 
 assert_received_messages(Messages) ->
-    assert_received_messages(Messages, []).
-assert_received_messages([], UnexpectedMessages) ->
-    assert_received_messages_wait([], UnexpectedMessages);
-assert_received_messages(Messages, UnexpectedMessages) ->
+    assert_received_messages(Messages, ?DEFAULT_WAIT_TIMEOUT ).
+assert_received_messages(Messages, Timeout) ->
+    assert_received_messages(Messages, [], Timeout).
+assert_received_messages([], UnexpectedMessages, Timeout) ->
+    assert_received_messages_wait([], UnexpectedMessages, Timeout);
+assert_received_messages(Messages, UnexpectedMessages, Timeout) ->
     receive
         Message ->
             case lists:member(Message, Messages) of
                 true ->
                     Messages1 = lists:delete(Message, Messages),
-                    assert_received_messages(Messages1, UnexpectedMessages);
+                    assert_received_messages(Messages1, UnexpectedMessages, Timeout);
 
                 false ->
-                    assert_received_messages(Messages, [Message | UnexpectedMessages])
+                    assert_received_messages(Messages, [Message | UnexpectedMessages], Timeout)
             end
-    after ?DEFAULT_WAIT_TIMEOUT ->
+    after Timeout->
         assert_received_messages_evaluate(Messages, UnexpectedMessages)
     end.
 
-assert_received_messages_wait(MissingMessages, UnexpectedMessages) ->
+assert_received_messages_wait(MissingMessages, UnexpectedMessages, Timeout) ->
     receive
         Message ->
-            assert_received_messages_wait(MissingMessages, [Message | UnexpectedMessages])
-    after ?UNEXPECTED_MESSAGES_WAIT_TIMEOUT ->
+            assert_received_messages_wait(MissingMessages, [Message | UnexpectedMessages], Timeout)
+    after Timeout ->
         assert_received_messages_evaluate(MissingMessages, UnexpectedMessages)
     end.
 
@@ -280,7 +281,7 @@ assert_empty_queue(UnexpectedMessages) ->
     receive
         Message ->
             assert_empty_queue([Message | UnexpectedMessages])
-    after ?UNEXPECTED_MESSAGES_WAIT_TIMEOUT ->
+    after ?DEFAULT_WAIT_TIMEOUT ->
         case UnexpectedMessages of
             [] -> ok;
             _ -> ct:fail("~n\tMessage queue was not empty, got:~n\t~p~n", [UnexpectedMessages])
