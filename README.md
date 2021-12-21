@@ -11,6 +11,8 @@ They are not **D**urable since Ram is an in-memory only database.
 
 Ram is at an early development stage.
 
+[[Documentation](https://hexdocs.pm/ram/)]
+
 ## Installation
 
 ### For Elixir
