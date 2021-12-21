@@ -47,9 +47,9 @@
 %% ```
 %% 1> ram:get("key").
 %% undefined
-%% 2> .ram:put("key", "value").
+%% 2> ram:put("key", "value").
 %% ok
-%% 3> .ram:get("key").
+%% 3> ram:get("key").
 %% "value"
 %% '''
 %%
