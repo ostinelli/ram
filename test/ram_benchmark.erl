@@ -28,7 +28,8 @@
 %% API
 -export([
     start/0,
-    put_on_node/4
+    put_on_node/4,
+    get_on_node/4
 ]).
 -export([
     start_profiling/1,
@@ -103,6 +104,21 @@ start() ->
     PutRate = MaxKeyCount / lists:max(PutRemoteNodesTimes),
     io:format("====> Put rate: ~p/sec.~n~n", [PutRate]),
 
+    %% start reading
+    lists:foreach(fun({Node, FromKey, ToKey}) ->
+        rpc:cast(Node, ?MODULE, get_on_node, [CollectorPid, WorkersPerNode, FromKey, ToKey])
+    end, NodesInfo),
+
+    %% wait
+    GetRemoteNodesTimes = wait_from_all_remote_nodes(nodes(), []),
+
+    io:format("----> Remote get times:~n"),
+    io:format("      --> MIN: ~p secs.~n", [lists:min(GetRemoteNodesTimes)]),
+    io:format("      --> MAX: ~p secs.~n", [lists:max(GetRemoteNodesTimes)]),
+
+    GetRate = MaxKeyCount / lists:max(GetRemoteNodesTimes),
+    io:format("====> Get rate: ~p/sec.~n~n", [GetRate]),
+
     %% stop node
     init:stop().
 
@@ -125,10 +141,34 @@ put_on_node(CollectorPid, WorkersPerNode, FromKey, ToKey) ->
     Time = wait_done_on_node(CollectorPid, 0, WorkersPerNode),
     io:format("----> Put on node ~p on ~p secs.~n", [node(), Time]).
 
+get_on_node(CollectorPid, WorkersPerNode, FromKey, ToKey) ->
+    Count = ToKey - FromKey + 1,
+    %% spawn workers
+    KeysPerNode = ceil(Count / WorkersPerNode),
+    ReplyPid = self(),
+    lists:foreach(fun(I) ->
+        WorkerFromKey = FromKey + (I - 1) * KeysPerNode,
+        WorkerToKey = lists:min([WorkerFromKey + KeysPerNode - 1, ToKey]),
+        spawn(fun() ->
+            StartAt = os:system_time(millisecond),
+            worker_get_on_node(WorkerFromKey, WorkerToKey),
+            Time = (os:system_time(millisecond) - StartAt) / 1000,
+            ReplyPid ! {done, Time}
+        end)
+    end, lists:seq(1, WorkersPerNode)),
+    %% wait
+    Time = wait_done_on_node(CollectorPid, 0, WorkersPerNode),
+    io:format("----> Put on node ~p on ~p secs.~n", [node(), Time]).
+
 worker_put_on_node(Key, WorkerToKey) when Key =< WorkerToKey ->
     ok = ram:put(Key, Key),
     worker_put_on_node(Key + 1, WorkerToKey);
 worker_put_on_node(_, _) -> ok.
+
+worker_get_on_node(Key, WorkerToKey) when Key =< WorkerToKey ->
+    Key = ram:get(Key),
+    worker_get_on_node(Key + 1, WorkerToKey);
+worker_get_on_node(_, _) -> ok.
 
 wait_done_on_node(CollectorPid, Time, 0) ->
     CollectorPid ! {done, node(), Time},
