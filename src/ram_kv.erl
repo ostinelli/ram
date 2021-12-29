@@ -87,7 +87,8 @@ fetch(Key) ->
     lock(Key, fun() ->
         case ets:lookup(?TABLE_STORE, Key) of
             [] -> error;
-            [{Key, Value, _Time}] -> {ok, Value}
+            [{Key, _Value, _Time, true}] -> error;
+            [{Key, Value, _Time, _Deleted}] -> {ok, Value}
         end
     end).
 
@@ -95,7 +96,7 @@ fetch(Key) ->
 put(Key, Value) ->
     lock(Key, fun() ->
         Method = insert,
-        Params = [{Key, Value, erlang:system_time()}],
+        Params = [{Key, Value, erlang:system_time(), false}],
         transaction_call(Method, Params)
     end).
 
@@ -104,20 +105,22 @@ update(Key, Default, Fun) ->
     lock(Key, fun() ->
         Value = case ets:lookup(?TABLE_STORE, Key) of
             [] -> Default;
-            [{Key, V, _Time}] -> Fun(V)
+            [{Key, _V, _Time, true}] -> Default;
+            [{Key, V, _Time, _Deleted}] -> Fun(V)
         end,
         Method = insert,
-        Params = [{Key, Value, erlang:system_time()}],
+        Params = [{Key, Value, erlang:system_time(), false}],
         transaction_call(Method, Params)
     end).
 
 -spec delete(Key :: term()) -> ok.
 delete(Key) ->
     lock(Key, fun() ->
-        Method = delete,
-        Params = [Key],
+        Method = insert,
+        Params = [{Key, undefined, erlang:system_time(), true}],
         case ets:lookup(?TABLE_STORE, Key) of
             [] -> ok;
+            [{Key, _V, _Time, true}] -> ok;
             _ -> transaction_call(Method, Params)
         end
     end).
@@ -370,20 +373,20 @@ all_local_entries() ->
 
 -spec merge(RemoteNode :: node(), [ram_entry()]) -> any().
 merge(_RemoteNode, []) -> ok;
-merge(RemoteNode, [{Key, RemoteValue, RemoteTime} | RemoteEntries]) ->
+merge(RemoteNode, [{Key, RemoteValue, RemoteTime, RemoteDeleted} | RemoteEntries]) ->
     case ets:lookup(?TABLE_STORE, Key) of
         [] ->
             %% key not local, insert
-            ets:insert(?TABLE_STORE, {Key, RemoteValue, RemoteTime});
+            ets:insert(?TABLE_STORE, {Key, RemoteValue, RemoteTime, RemoteDeleted});
 
-        [{Key, LocalValue, LocalTime}] ->
+        [{Key, LocalValue, LocalTime, Deleted}] ->
             %% conflict
             case ram_event_handler:do_resolve_conflict(
                 Key,
-                {node(), LocalValue, LocalTime},
-                {RemoteNode, RemoteValue, RemoteTime}
+                {node(), LocalValue, LocalTime, Deleted},
+                {RemoteNode, RemoteValue, RemoteTime, RemoteDeleted}
             ) of
-                {ok, ValueToKeep} -> ets:insert(?TABLE_STORE, {Key, ValueToKeep, erlang:system_time()});
+                {ok, ValueToKeep, DeletedToKeep} -> ets:insert(?TABLE_STORE, {Key, ValueToKeep, erlang:system_time(), DeletedToKeep});
                 error -> ets:delete(?TABLE_STORE, Key)
             end
     end,

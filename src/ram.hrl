@@ -30,5 +30,6 @@
 -type ram_entry() :: {
     Key :: term(),
     Value :: term(),
-    Time :: non_neg_integer()
+    Time :: non_neg_integer(),
+    Deleted :: boolean()
 }.
