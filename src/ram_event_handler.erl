@@ -35,9 +35,9 @@
 %% @private
 -spec do_resolve_conflict(
     Key :: term(),
-    {Node1 :: node(), Value1 :: term(), Time1 :: non_neg_integer()},
-    {Node2 :: node(), Value2 :: term(), Time2 :: non_neg_integer()}
-) -> {ok, ValueToKeep :: term()} | error.
+    {Node1 :: node(), Value1 :: term(), Time1 :: non_neg_integer(), Deleted1 :: boolean()},
+    {Node2 :: node(), Value2 :: term(), Time2 :: non_neg_integer(), Deleted1 :: boolean()}
+) -> {ok, ValueToKeep :: term(), DeletedToKeep :: boolean()}.
 do_resolve_conflict(_Key, {_Node1, Value1, Time1, Deleted1}, {_Node2, Value2, Time2, Deleted2}) ->
     %% by default, keep value registered more recently
     %% NB: this is a simple mechanism that can be imprecise

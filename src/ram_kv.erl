@@ -48,9 +48,21 @@
 
 %% macros
 -define(TRANSACTION_TIMEOUT, 5000).
+-define(DELETED_CLEAN_AFTER, 60 * 60 * 24 * 1000). %% 1 day
+-define(DELETED_CLEAN_INTERVAL, 60 * 60 * 1000). %% 1 hour
 
 %% records
 -record(state, {}).
+
+%% tests
+-ifdef(TEST).
+-export([apply_to_ets/2]).
+-define(ETS_ACCESS, public).
+-define(DELETED_CLEAN_INTERVAL_REAL, 1000).
+-else.
+-define(ETS_ACCESS, protected).
+-define(DELETED_CLEAN_INTERVAL_REAL, ?DELETED_CLEAN_INTERVAL).
+-endif.
 
 %% includes
 -include("ram.hrl").
@@ -160,9 +172,11 @@ init([]) ->
     %% monitor nodes
     ok = net_kernel:monitor_nodes(true),
     %% create tables
-    ets:new(?TABLE_STORE, [set, protected, named_table, {read_concurrency, true}] ++ ?ETS_OPTIMIZATIONS),
-    ets:new(?TABLE_TRANSACTIONS, [set, protected, named_table, {read_concurrency, true}] ++ ?ETS_OPTIMIZATIONS),
-    ets:new(?TABLE_SHARED, [set, protected, named_table, {read_concurrency, true}] ++ ?ETS_OPTIMIZATIONS),
+    ets:new(?TABLE_STORE, [set, ?ETS_ACCESS, named_table, {read_concurrency, true}] ++ ?ETS_OPTIMIZATIONS),
+    ets:new(?TABLE_TRANSACTIONS, [set, ?ETS_ACCESS, named_table, {read_concurrency, true}] ++ ?ETS_OPTIMIZATIONS),
+    ets:new(?TABLE_SHARED, [set, ?ETS_ACCESS, named_table, {read_concurrency, true}] ++ ?ETS_OPTIMIZATIONS),
+    %% start clean interval
+    timer:send_interval(?DELETED_CLEAN_INTERVAL_REAL, clean_deleted),
     %% init
     {ok, #state{}, {continue, after_init}}.
 
@@ -282,6 +296,15 @@ handle_info({transaction_timeout, Tid}, State) ->
     remove_transaction_from_temp(Tid),
     {noreply, State};
 
+handle_info(clean_deleted, State) ->
+    KeepTime = erlang:system_time() - (?DELETED_CLEAN_AFTER * 1000000),
+    _ = ets:select_delete(?TABLE_STORE, [{
+        {'_', '_', '$3', true},
+        [{'<', '$3', KeepTime}],
+        [true]
+    }]),
+    {noreply, State};
+
 handle_info(Info, State) ->
     error_logger:warning_msg("RAM[~s] Received an unknown info message: ~p", [node(), Info]),
     {noreply, State}.
@@ -381,13 +404,11 @@ merge(RemoteNode, [{Key, RemoteValue, RemoteTime, RemoteDeleted} | RemoteEntries
 
         [{Key, LocalValue, LocalTime, Deleted}] ->
             %% conflict
-            case ram_event_handler:do_resolve_conflict(
+            {ok, ValueToKeep, DeletedToKeep} = ram_event_handler:do_resolve_conflict(
                 Key,
                 {node(), LocalValue, LocalTime, Deleted},
                 {RemoteNode, RemoteValue, RemoteTime, RemoteDeleted}
-            ) of
-                {ok, ValueToKeep, DeletedToKeep} -> ets:insert(?TABLE_STORE, {Key, ValueToKeep, erlang:system_time(), DeletedToKeep});
-                error -> ets:delete(?TABLE_STORE, Key)
-            end
+            ),
+            ets:insert(?TABLE_STORE, {Key, ValueToKeep, erlang:system_time(), DeletedToKeep})
     end,
     merge(RemoteNode, RemoteEntries).

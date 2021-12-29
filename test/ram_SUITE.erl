@@ -33,7 +33,8 @@
 
 %% tests
 -export([
-    one_node_operations/1
+    one_node_operations/1,
+    one_node_clean_deleted/1
 ]).
 -export([
     two_nodes_only_one_active/1
@@ -87,7 +88,8 @@ all() ->
 groups() ->
     [
         {one_node, [shuffle], [
-            one_node_operations
+            one_node_operations,
+            one_node_clean_deleted
         ]},
         {two_nodes, [shuffle], [
             two_nodes_only_one_active
@@ -200,6 +202,23 @@ one_node_operations(_Config) ->
     %% delete
     ok = ram:delete("key"),
     undefined = ram:get("key").
+
+one_node_clean_deleted(_Config) ->
+    %% start ram
+    ok = ram:start(),
+
+    %% add delete now
+    true = ram_kv:apply_to_ets(insert, [{"deleted-recent-key", "deleted-recent-value", erlang:system_time(), true}]),
+
+    %% add delete 1 day ago - 1 second
+    DeletedTime = erlang:system_time() - ((60 * 60 * 24) - 1) * 1000000000,
+    true = ram_kv:apply_to_ets(insert, [{"deleted-key", "deleted-value", DeletedTime, true}]),
+
+    %% check entry removed
+    ram_test_suite_helper:assert_wait(
+        1,
+        fun() -> length(ets:tab2list(?TABLE_STORE)) end
+    ).
 
 two_nodes_only_one_active(_Config) ->
     %% start ram only on main
