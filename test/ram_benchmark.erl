@@ -53,8 +53,8 @@ start() ->
     MaxKeyCount = KeysPerNode * SlavesCount,
 
     io:format("====> Starting benchmark~n"),
-    io:format("      --> Nodes: ~w / ~w slave(s)~n", [SlavesCount + 1, SlavesCount]),
-    io:format("      --> Total keys: ~w (~w / slave node)~n", [MaxKeyCount, KeysPerNode]),
+    io:format("      --> Nodes: ~w~n", [SlavesCount]),
+    io:format("      --> Total keys: ~w (~w / node)~n", [MaxKeyCount, KeysPerNode]),
     io:format("      --> Workers per node: ~w~n~n", [WorkersPerNode]),
 
     %% start nodes
@@ -69,6 +69,8 @@ start() ->
         %% add code path
         CodePath = code:get_path(),
         true = rpc:call(Node, code, set_path, [CodePath]),
+        %% init
+        ok = rpc:call(Node, application, set_env, [ra, data_dir, "/tmp/ra-bench"]),
         %% start ram
         ok = rpc:call(Node, ram, start, []),
         %% gather data

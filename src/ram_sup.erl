@@ -46,5 +46,14 @@ start_link() ->
 -spec init([]) ->
     {ok, {{supervisor:strategy(), non_neg_integer(), pos_integer()}, [supervisor:child_spec()]}}.
 init([]) ->
-    Children = [],
+    Children = [
+        #{
+            id => ram_backbone,
+            start => {ram_backbone, start_link, []},
+            type => worker,
+            shutdown => 10000,
+            restart => permanent,
+            modules => [ram_backbone]
+        }
+    ],
     {ok, {{one_for_one, 10, 10}, Children}}.

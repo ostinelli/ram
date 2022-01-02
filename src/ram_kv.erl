@@ -55,34 +55,36 @@ get(Key, Default) ->
 
 -spec fetch(Key :: term()) -> {ok, Value :: term()} | error.
 fetch(Key) ->
-    case ra:process_command({ram, node()}, {fetch, Key}) of
-        {ok, Reply, _} -> Reply;
-        {error, Reason} -> error({ram, Reason});
-        {timeout, ServerId} -> error({ram, {timeout, ServerId}})
-    end.
+    process_command({fetch, Key}).
 
 -spec put(Key :: term(), Value :: term()) -> ok.
 put(Key, Value) ->
-    case ra:process_command({ram, node()}, {put, Key, Value}) of
-        {ok, _, _} -> ok;
-        {error, Reason} -> error({ram, Reason});
-        {timeout, ServerId} -> error({ram, {timeout, ServerId}})
-    end.
+    process_command({put, Key, Value}).
 
 -spec update(Key :: term(), Default :: term(), function()) -> ok.
 update(Key, Default, Fun) ->
-    case ra:process_command({ram, node()}, {update, Key, Default, Fun}) of
-        {ok, _, _} -> ok;
-        {error, Reason} -> error({ram, Reason});
-        {timeout, ServerId} -> error({ram, {timeout, ServerId}})
-    end.
+    process_command({update, Key, Default, Fun}).
 
 -spec delete(Key :: term()) -> ok.
 delete(Key) ->
-    case ra:process_command({ram, node()}, {delete, Key}) of
-        {ok, _, _} -> ok;
-        {error, Reason} -> error({ram, Reason});
-        {timeout, ServerId} -> error({ram, {timeout, ServerId}})
+    process_command({delete, Key}).
+
+-spec process_command(ram_kv_command()) -> Reply :: term().
+process_command(Command) ->
+    LeaderId = ram_backbone:get_leader_id(),
+    case ra:process_command(LeaderId, Command) of
+        {ok, Reply, NewLeaderId} ->
+            case NewLeaderId of
+                LeaderId -> ok;
+                _ -> ram_backbone:set_leader_id(NewLeaderId)
+            end,
+            Reply;
+
+        {error, Reason} ->
+            error({ram, Reason});
+
+        {timeout, ServerId} ->
+            error({ram, {timeout, ServerId}})
     end.
 
 %% ===================================================================
