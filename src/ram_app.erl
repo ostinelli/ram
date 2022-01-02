@@ -3,7 +3,7 @@
 %%
 %% The MIT License (MIT)
 %%
-%% Copyright (c) 2021 Roberto Ostinelli <roberto@ostinelli.net>.
+%% Copyright (c) 2021-2022 Roberto Ostinelli <roberto@ostinelli.net>.
 %%
 %% Permission is hereby granted, free of charge, to any person obtaining a copy
 %% of this software and associated documentation files (the "Software"), to deal
@@ -38,8 +38,9 @@
     StartArgs :: term()
 ) -> {ok, pid()} | {ok, pid(), State :: term()} | {error, term()}.
 start(_StartType, _StartArgs) ->
-    %% ensure event handler is loaded
-    ram_event_handler:ensure_event_handler_loaded(),
+    %% set defaults
+    DataDir = application:get_env(ram, data_dir, "/tmp/ra-release"),
+    ok = application:set_env(ra, data_dir, DataDir),
     %% start main sup
     ram_sup:start_link().
 

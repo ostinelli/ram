@@ -3,7 +3,7 @@
 %%
 %% The MIT License (MIT)
 %%
-%% Copyright (c) 2021 Roberto Ostinelli <roberto@ostinelli.net>.
+%% Copyright (c) 2021-2022 Roberto Ostinelli <roberto@ostinelli.net>.
 %%
 %% Permission is hereby granted, free of charge, to any person obtaining a copy
 %% of this software and associated documentation files (the "Software"), to deal
@@ -27,62 +27,22 @@
 %% ===================================================================
 %% @doc Exposes all of the Key Value store APIs.
 %%
-%% Ram doesn't have to run on every node of the Erlang cluster. You may start Ram only on those nodes where you
-%% need it. When started, Ram creates a logical overlay network running on top of the Erlang distribution cluster.
-%%
-%% Nodes where Ram runs form a subcluster: they will synchronize data between themselves, and themselves only.
-%% All of the data is replicated on every node of the subcluster.
-%%
 %% <h2>Quickstart</h2>
-%% <h3>Elixir</h3>
-%% ```
-%% iex(1)> :ram.get("key")
-%% :undefined
-%% iex(2)> :ram.put("key", "value")
-%% :ok
-%% iex(3)> :ram.get("key")
-%% "value"
-%% '''
-%% <h3>Erlang</h3>
-%% ```
-%% 1> ram:get("key").
-%% undefined
-%% 2> ram:put("key", "value").
-%% ok
-%% 3> ram:get("key").
-%% "value"
-%% '''
-%%
-%% <h2>Internals</h2>
-%% Ram operations are <strong>A</strong>tomic (take effect on all nodes involved, or on none of the nodes),
-%% <strong>C</strong>onsistent (the data is the same across all nodes)
-%% and <strong>I</strong>solated (operations on different nodes in a network do not interfere with each other).
-%% They are not <strong>D</strong>urable since Ram is an in-memory only database.
-%%
-%% To do so, every operation creates a global lock with {@link global:trans/4} in the caller process, which then
-%% runs a transaction with a 2-phase commit protocol. If transactions fail, they raise
-%% `error({commit_timeout, {bad_nodes, BadNodes}})' where `BadNodes' is the list of subcluster nodes where the
-%% transaction could not complete.
-%%
-%% <h2>Conflict Resolution</h2>
-%% In case of net splits or bad network conditions, a specific Key might get put simultaneously on two different nodes.
-%% When this happens, the cluster experiences a Key conflict.
-%%
-%% Ram will resolve this conflict by choosing a single Value. By default, Ram keeps track of the time
-%% when a registration takes place with {@link erlang:system_time/0}, compares values between conflicting processes and
-%% keeps the one with the higher value (the Value that was put more recently). This is a very simple mechanism
-%% that can be imprecise, as system clocks are not perfectly aligned in a cluster.
+%% TODO.
 %% @end
 %% ===================================================================
 -module(ram).
 
 %% API
 -export([start/0, stop/0]).
--export([subcluster_nodes/0]).
+-export([start_cluster/1, stop_cluster/1]).
 -export([get/1, get/2, fetch/1]).
 -export([put/2]).
 -export([update/3]).
 -export([delete/1]).
+
+%% includes
+-include("ram.hrl").
 
 %% ===================================================================
 %% API
@@ -101,10 +61,45 @@ start() ->
 stop() ->
     application:stop(ram).
 
-%% @doc Returns the nodes of Ram's subcluster.
--spec subcluster_nodes() -> [node()] | not_running.
-subcluster_nodes() ->
-    ram_kv:subcluster_nodes().
+%% @doc Starts the Ram cluster.
+-spec start_cluster([node()]) -> ok | {error, Reason :: term()}.
+start_cluster(Nodes) ->
+    %% init
+    ServerIds = [{?CLUSTER_NAME, N} || N <- Nodes],
+    Machine = {module, ram_kv, #{}},
+    %% start ra
+    lists:foreach(fun(Node) ->
+        ok = rpc:call(Node, ra, start, [])
+    end, Nodes),
+    %% start cluster
+    case ra:start_cluster(default, ?CLUSTER_NAME, Machine, ServerIds) of
+        {ok, StartedIds, _NotStartedIds} when length(StartedIds) =:= length(Nodes) ->
+            error_logger:info_msg("RAM[~s] Cluster started on ~p", [node(), ServerIds]),
+            ok;
+
+        {ok, StartedIds, NotStartedIds} ->
+            error_logger:warning_msg("RAM[~s] Cluster started on ~p but but not on ~p", [node(), StartedIds, NotStartedIds]),
+            ok;
+
+        {error, Reason} ->
+            error_logger:error_msg("RAM[~s] Could not start cluster on ~p: ~p", [node(), ServerIds, Reason]),
+            {error, Reason}
+    end.
+
+%% @doc Stops the Ram cluster.
+-spec stop_cluster([node()]) -> ok | {error, Reason :: term()}.
+stop_cluster(Nodes) ->
+    %% init
+    ServerIds = [{?CLUSTER_NAME, N} || N <- Nodes],
+    case ra:delete_cluster(ServerIds) of
+        {ok, _LeaderId} ->
+            error_logger:info_msg("RAM[~s] Cluster stopped on ~p", [node(), ServerIds]),
+            ok;
+
+        {error, Reason} ->
+            error_logger:error_msg("RAM[~s] Could not stop cluster on ~p: ~p", [node(), ServerIds, Reason]),
+            {error, Reason}
+    end.
 
 %% @equiv get(Key, undefined)
 %% @end

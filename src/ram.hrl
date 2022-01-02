@@ -1,9 +1,9 @@
 %% ==========================================================================================================
-%% Ram - An in-memory distributed KV store for Erlang and Elixir.
+%% Ram - An ephemeral distributed KV store for Erlang and Elixir.
 %%
 %% The MIT License (MIT)
 %%
-%% Copyright (c) 2021 Roberto Ostinelli <roberto@ostinelli.net>.
+%% Copyright (c) 2021-2022 Roberto Ostinelli <roberto@ostinelli.net>.
 %%
 %% Permission is hereby granted, free of charge, to any person obtaining a copy
 %% of this software and associated documentation files (the "Software"), to deal
@@ -23,12 +23,4 @@
 %% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 %% THE SOFTWARE.
 %% ==========================================================================================================
--define(TABLE_STORE, ram_store).
--define(TABLE_TRANSACTIONS, ram_transactions).
--define(TABLE_SHARED, ram_shared).
-
--type ram_entry() :: {
-    Key :: term(),
-    Value :: term(),
-    Time :: non_neg_integer()
-}.
+-define(CLUSTER_NAME, ram).

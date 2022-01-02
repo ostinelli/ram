@@ -1,13 +1,9 @@
 ![CI](https://github.com/ostinelli/ram/actions/workflows/ci.yml/badge.svg) [![Hex pm](https://img.shields.io/hexpm/v/ram.svg)](https://hex.pm/packages/ram)
 
 # Ram
-**Ram** is an in-memory distributed KV store for Erlang and Elixir, able to automatically manage dynamic clusters
-(addition / removal of nodes) and to recover from net splits.
+**Ram** is an in-memory distributed KV store for Erlang and Elixir.
 
-Ram operations are **A**tomic (take effect on all nodes involved, or on none of the nodes),
-**C**onsistent (the data is the same across all nodes)
-and **I**solated (operations on different nodes in a network do not interfere with each other).
-They are not **D**urable since Ram is an in-memory only database. 
+Ram uses the [Raft Consensus Algorithm](https://raft.github.io/) and is based on [Ra](https://github.com/rabbitmq/ra).
 
 Ram is at an early development stage.
 

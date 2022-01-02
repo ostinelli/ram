@@ -27,6 +27,16 @@ else
 	-eval 'ram:start().'
 endif
 
+console: all
+ifdef sname
+	@# 'make test sname=ram2
+	@erl -pa `rebar3 path` \
+	-name $(sname)@127.0.0.1
+else
+	@erl -pa `rebar3 path` \
+	-name ram@127.0.0.1
+endif
+
 test: compile_test
 ifdef suite
 	@# 'make test suite=ram_SUITE'

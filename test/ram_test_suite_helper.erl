@@ -3,7 +3,7 @@
 %%
 %% The MIT License (MIT)
 %%
-%% Copyright (c) 2015-2021 Roberto Ostinelli <roberto@ostinelli.net> and Neato Robotics, Inc.
+%% Copyright (c) 2015-2022 Roberto Ostinelli <roberto@ostinelli.net> and Neato Robotics, Inc.
 %%
 %% Permission is hereby granted, free of charge, to any person obtaining a copy
 %% of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,6 @@
 -export([wait_cluster_mesh_connected/1]).
 -export([wait_process_name_ready/1]).
 -export([assert_cluster/2]).
--export([assert_subcluster/2]).
 -export([assert_received_messages/1, assert_received_messages/2]).
 -export([assert_empty_queue/0]).
 -export([assert_wait/2]).
@@ -116,17 +115,15 @@ disconnect_node(Node) ->
     erlang:disconnect_node(Node).
 
 clean_after_test() ->
-    Nodes = [node() | nodes()],
-    %% shutdown
-    lists:foreach(fun(Node) ->
-        %% close ram
-        rpc:call(Node, application, stop, [ram]),
-        %% clean env
-        rpc:call(Node, application, unset_env, [ram, event_handler]),
-        rpc:call(Node, application, unset_env, [ram, strict_mode]),
-        %% messages
-        flush_inbox()
-    end, Nodes).
+%%    Nodes = [node() | nodes()],
+%%    %% shutdown
+%%    lists:foreach(fun(Node) ->
+%%        %% close ram
+%%%%        rpc:call(Node, application, stop, [ram])
+%%    end, Nodes),
+%%    %% messages
+%%    flush_inbox().
+    ok.
 
 start_process() ->
     Pid = spawn(fun process_main/0),
@@ -223,20 +220,6 @@ assert_cluster(Node, ExpectedNodes, StartAt) ->
     case do_assert_cluster(Nodes, ExpectedNodes, StartAt) of
         continue -> assert_cluster(Node, ExpectedNodes, StartAt);
         _ -> ok
-    end.
-
-assert_subcluster(Node, ExpectedNodes) ->
-    assert_subcluster(Node, ExpectedNodes, os:system_time(millisecond)).
-assert_subcluster(Node, ExpectedNodes, StartAt) ->
-    case rpc:call(Node, ram, subcluster_nodes, []) of
-        not_running ->
-            undefined;
-
-        Nodes ->
-            case do_assert_cluster(Nodes, ExpectedNodes, StartAt) of
-                continue -> assert_subcluster(Node, ExpectedNodes, StartAt);
-                _ -> ok
-            end
     end.
 
 assert_received_messages(Messages) ->
