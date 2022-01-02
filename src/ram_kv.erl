@@ -55,7 +55,16 @@ get(Key, Default) ->
 
 -spec fetch(Key :: term()) -> {ok, Value :: term()} | error.
 fetch(Key) ->
-    process_command({fetch, Key}).
+    LeaderId = ram_backbone:get_leader_id(),
+    case ra:consistent_query(LeaderId,
+        fun(State) ->
+            maps:find(Key, State)
+        end) of
+        {ok, {ok, Value}, _} -> {ok, Value};
+        {ok, error, _} -> error;
+        {error, Reason} -> error({ram, Reason});
+        {timeout, ServerId} -> error({ram, {timeout, ServerId}})
+    end.
 
 -spec put(Key :: term(), Value :: term()) -> ok.
 put(Key, Value) ->

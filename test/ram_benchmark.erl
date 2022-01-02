@@ -51,6 +51,7 @@ start() ->
 
     KeysPerNode = round(KeyCount / SlavesCount),
     MaxKeyCount = KeysPerNode * SlavesCount,
+    CollectorPid = self(),
 
     io:format("====> Starting benchmark~n"),
     io:format("      --> Nodes: ~w~n", [SlavesCount]),
@@ -86,10 +87,6 @@ start() ->
 
     %% cluster
     ram:start_cluster(Nodes),
-
-    %% start
-    io:format("~n====> Starting benchmark~n~n"),
-    CollectorPid = self(),
 
     %% start registration
     lists:foreach(fun({Node, FromKey, ToKey}) ->
@@ -160,7 +157,7 @@ get_on_node(CollectorPid, WorkersPerNode, FromKey, ToKey) ->
     end, lists:seq(1, WorkersPerNode)),
     %% wait
     Time = wait_done_on_node(CollectorPid, 0, WorkersPerNode),
-    io:format("----> Put on node ~p on ~p secs.~n", [node(), Time]).
+    io:format("----> Get on node ~p on ~p secs.~n", [node(), Time]).
 
 worker_put_on_node(Key, WorkerToKey) when Key =< WorkerToKey ->
     ok = ram:put(Key, Key),
