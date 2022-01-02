@@ -39,6 +39,7 @@
     three_nodes_operations/1
 ]).
 -export([
+    four_nodes_cluster_changes/1,
     four_nodes_cluster_net_splits/1
 ]).
 
@@ -84,6 +85,7 @@ groups() ->
             three_nodes_operations
         ]},
         {four_nodes, [shuffle], [
+            four_nodes_cluster_changes,
             four_nodes_cluster_net_splits
         ]}
     ].
@@ -247,6 +249,42 @@ three_nodes_operations(Config) ->
 
     %% stop cluster
     ok = ram:stop_cluster([node(), SlaveNode1, SlaveNode2]).
+
+four_nodes_cluster_changes(Config) ->
+    %% get slaves
+    SlaveNode1 = proplists:get_value(ram_slave_1, Config),
+    SlaveNode2 = proplists:get_value(ram_slave_2, Config),
+    SlaveNode3 = proplists:get_value(ram_slave_3, Config),
+
+    %% start ram
+    ok = rpc:call(SlaveNode1, ram, start, []),
+    ok = rpc:call(SlaveNode2, ram, start, []),
+    ok = rpc:call(SlaveNode3, ram, start, []),
+
+    %% create cluster
+    ok = ram:start_cluster([SlaveNode1, SlaveNode2]),
+
+    %% put
+    ok = rpc:call(SlaveNode1, ram, put, ["key-1", "value-1"]),
+    ok = rpc:call(SlaveNode2, ram, put, ["key-2", "value-2"]),
+
+    %% retrieve
+    "value-1" = rpc:call(SlaveNode1, ram, get, ["key-1"]),
+    "value-2" = rpc:call(SlaveNode1, ram, get, ["key-2"]),
+    "value-1" = rpc:call(SlaveNode2, ram, get, ["key-1"]),
+    "value-2" = rpc:call(SlaveNode2, ram, get, ["key-2"]),
+
+    %% add node
+    ok = ram:start(),
+    ok = ram:add_node(SlaveNode3, SlaveNode1),
+
+    %% retrieve
+    "value-1" = rpc:call(SlaveNode1, ram, get, ["key-1"]),
+    "value-2" = rpc:call(SlaveNode1, ram, get, ["key-2"]),
+    "value-1" = rpc:call(SlaveNode2, ram, get, ["key-1"]),
+    "value-2" = rpc:call(SlaveNode2, ram, get, ["key-2"]),
+    "value-1" = rpc:call(SlaveNode3, ram, get, ["key-1"]),
+    "value-2" = rpc:call(SlaveNode3, ram, get, ["key-2"]).
 
 four_nodes_cluster_net_splits(Config) ->
     %% get slaves

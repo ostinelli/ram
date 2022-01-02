@@ -36,6 +36,7 @@
 %% API
 -export([start/0, stop/0]).
 -export([start_cluster/1, stop_cluster/1]).
+-export([add_node/2]).
 -export([get/1, get/2, fetch/1]).
 -export([put/2]).
 -export([update/3]).
@@ -96,6 +97,33 @@ stop_cluster(Nodes) ->
 
         {error, Reason} ->
             error_logger:error_msg("RAM[~s] Could not stop cluster on ~p: ~p", [node(), ram_backbone:get_nodes(ServerIds), Reason]),
+            {error, Reason}
+    end.
+
+-spec add_node(Node :: node(), RefNode :: node()) -> ok | {error, Reason :: term()}.
+add_node(Node, RefNode) ->
+    %% init
+    LeaderId = ram_backbone:make_server_id(RefNode),
+    ServerId = ram_backbone:make_server_id(Node),
+    %% start ra
+    ok = rpc:call(Node, ra, start, []),
+    %% add
+    case ra:add_member(LeaderId, ServerId) of
+        {ok, _, NewLeaderId} ->
+            ram_backbone:maybe_update_leader_id(LeaderId, NewLeaderId),
+            Machine = {module, ram_kv, #{}},
+            case ra:start_server(default, ram, ServerId, Machine, [LeaderId]) of
+                ok ->
+                    error_logger:info_msg("RAM[~s] Node ~s added to cluster", [node(), Node]),
+                    ok;
+
+                {error, Reason} ->
+                    error_logger:error_msg("RAM[~s] Error addding node ~s to cluster: ~p", [node(), Node, Reason]),
+                    {error, Reason}
+            end;
+
+        {error, Reason} ->
+            error_logger:error_msg("RAM[~s] Error addding node ~s to cluster: ~p", [node(), Node, Reason]),
             {error, Reason}
     end.
 
