@@ -78,13 +78,16 @@ start() ->
         [{Node, FromKey, ToKey} | Acc]
     end, [], lists:seq(1, SlavesCount)),
 
-    %% start ram locally
-    ok = ram:start(),
-    timer:sleep(1000),
+    %% wait for cluster
+    Nodes = lists:foldl(fun({Node, _FromKey, _ToKey}, Acc) -> [Node | Acc] end, [], NodesInfo),
+    ram_test_suite_helper:wait_cluster_mesh_connected(Nodes),
 
-    CollectorPid = self(),
+    %% cluster
+    ram:start_cluster(Nodes),
 
+    %% start
     io:format("~n====> Starting benchmark~n~n"),
+    CollectorPid = self(),
 
     %% start registration
     lists:foreach(fun({Node, FromKey, ToKey}) ->
@@ -93,9 +96,6 @@ start() ->
 
     %% wait
     PutRemoteNodesTimes = wait_from_all_remote_nodes(nodes(), []),
-
-    %% ckeck
-    MaxKeyCount = ram:get(MaxKeyCount),
 
     io:format("----> Remote put times:~n"),
     io:format("      --> MIN: ~p secs.~n", [lists:min(PutRemoteNodesTimes)]),

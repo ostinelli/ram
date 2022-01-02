@@ -115,15 +115,14 @@ disconnect_node(Node) ->
     erlang:disconnect_node(Node).
 
 clean_after_test() ->
-%%    Nodes = [node() | nodes()],
-%%    %% shutdown
-%%    lists:foreach(fun(Node) ->
-%%        %% close ram
-%%%%        rpc:call(Node, application, stop, [ram])
-%%    end, Nodes),
-%%    %% messages
-%%    flush_inbox().
-    ok.
+    Nodes = [node() | nodes()],
+    %% shutdown
+    lists:foreach(fun(Node) ->
+        %% close ram
+        rpc:call(Node, application, stop, [ram])
+    end, Nodes),
+    %% messages
+    flush_inbox().
 
 start_process() ->
     Pid = spawn(fun process_main/0),

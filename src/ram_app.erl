@@ -38,9 +38,6 @@
     StartArgs :: term()
 ) -> {ok, pid()} | {ok, pid(), State :: term()} | {error, term()}.
 start(_StartType, _StartArgs) ->
-    %% set defaults
-    DataDir = application:get_env(ram, data_dir, "/tmp/ra-release"),
-    ok = application:set_env(ra, data_dir, DataDir),
     %% start main sup
     ram_sup:start_link().
 
