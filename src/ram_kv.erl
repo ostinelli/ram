@@ -39,7 +39,7 @@
 -type ram_kv_command() ::
 {fetch, Key :: term()} |
 {put, Key :: term(), Value :: term()} |
-{update, Key :: term(),  Default :: term(), UpdateFun :: function()} |
+{update, Key :: term(), Default :: term(), UpdateFun :: function()} |
 {delete, Key :: term()}.
 
 
@@ -56,37 +56,33 @@ get(Key, Default) ->
 -spec fetch(Key :: term()) -> {ok, Value :: term()} | error.
 fetch(Key) ->
     case ra:process_command({ram, node()}, {fetch, Key}) of
-        {ok, Reply, _} ->
-            Reply;
-        Err ->
-            Err
+        {ok, Reply, _} -> Reply;
+        {error, Reason} -> error({ram, Reason});
+        {timeout, ServerId} -> error({ram, {timeout, ServerId}})
     end.
 
 -spec put(Key :: term(), Value :: term()) -> ok.
 put(Key, Value) ->
     case ra:process_command({ram, node()}, {put, Key, Value}) of
-        {ok, _, _} ->
-            ok;
-        Err ->
-            Err
+        {ok, _, _} -> ok;
+        {error, Reason} -> error({ram, Reason});
+        {timeout, ServerId} -> error({ram, {timeout, ServerId}})
     end.
 
 -spec update(Key :: term(), Default :: term(), function()) -> ok.
 update(Key, Default, Fun) ->
     case ra:process_command({ram, node()}, {update, Key, Default, Fun}) of
-        {ok, _, _} ->
-            ok;
-        Err ->
-            Err
+        {ok, _, _} -> ok;
+        {error, Reason} -> error({ram, Reason});
+        {timeout, ServerId} -> error({ram, {timeout, ServerId}})
     end.
 
 -spec delete(Key :: term()) -> ok.
 delete(Key) ->
     case ra:process_command({ram, node()}, {delete, Key}) of
-        {ok, _, _} ->
-            ok;
-        Err ->
-            Err
+        {ok, _, _} -> ok;
+        {error, Reason} -> error({ram, Reason});
+        {timeout, ServerId} -> error({ram, {timeout, ServerId}})
     end.
 
 %% ===================================================================
