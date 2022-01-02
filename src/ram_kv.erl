@@ -54,8 +54,8 @@ get(Key, Default) ->
 
 -spec fetch(Key :: term()) -> {ok, Value :: term()} | error.
 fetch(Key) ->
-    LeaderId = ram_backbone:get_leader_id(),
-    case ra:consistent_query(LeaderId,
+    ServerLoc = ram_backbone:get_server_loc(),
+    case ra:consistent_query(ServerLoc,
         fun(State) ->
             maps:find(Key, State)
         end) of
@@ -79,17 +79,17 @@ delete(Key) ->
 
 -spec process_command(ram_kv_command()) -> Reply :: term().
 process_command(Command) ->
-    LeaderId = ram_backbone:get_leader_id(),
-    case ra:process_command(LeaderId, Command) of
-        {ok, Reply, NewLeaderId} ->
-            ram_backbone:maybe_update_leader_id(LeaderId, NewLeaderId),
+    ServerLoc = ram_backbone:get_server_loc(),
+    case ra:process_command(ServerLoc, Command) of
+        {ok, Reply, NewServerLoc} ->
+            ram_backbone:maybe_update_server_loc(ServerLoc, NewServerLoc),
             Reply;
 
         {error, Reason} ->
             error({ram, Reason});
 
-        {timeout, LeaderId} ->
-            error({ram, {timeout, LeaderId}})
+        {timeout, ServerLoc} ->
+            error({ram, {timeout, ServerLoc}})
     end.
 
 %% ===================================================================

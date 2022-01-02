@@ -91,7 +91,7 @@ stop_cluster(Nodes) ->
     %% init
     ServerIds = [ram_backbone:make_server_id(Node) || Node <- Nodes],
     case ra:delete_cluster(ServerIds) of
-        {ok, _LeaderId} ->
+        {ok, _ServerLoc} ->
             error_logger:info_msg("RAM[~s] Cluster stopped on ~p", [node(), ram_backbone:get_nodes(ServerIds)]),
             ok;
 
@@ -103,16 +103,16 @@ stop_cluster(Nodes) ->
 -spec add_node(Node :: node(), RefNode :: node()) -> ok | {error, Reason :: term()}.
 add_node(Node, RefNode) ->
     %% init
-    LeaderId = ram_backbone:make_server_id(RefNode),
     ServerId = ram_backbone:make_server_id(Node),
+    ServerLoc = ram_backbone:make_server_id(RefNode),
     %% start ra
     ok = rpc:call(Node, ra, start, []),
     %% add
-    case ra:add_member(LeaderId, ServerId) of
-        {ok, _, NewLeaderId} ->
-            ram_backbone:maybe_update_leader_id(LeaderId, NewLeaderId),
+    case ra:add_member(ServerLoc, ServerId) of
+        {ok, _, NewServerLoc} ->
+            ram_backbone:maybe_update_server_loc(ServerLoc, NewServerLoc),
             Machine = {module, ram_kv, #{}},
-            case ra:start_server(default, ram, ServerId, Machine, [LeaderId]) of
+            case ra:start_server(default, ram, ServerId, Machine, [ServerLoc]) of
                 ok ->
                     error_logger:info_msg("RAM[~s] Node ~s added to cluster", [node(), Node]),
                     ok;

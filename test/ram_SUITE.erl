@@ -308,7 +308,7 @@ four_nodes_cluster_net_splits(Config) ->
     "value" = rpc:call(SlaveNode2, ram, get, ["key"]),
     "value" = rpc:call(SlaveNode3, ram, get, ["key"]),
 
-    LeaderId = rpc:call(SlaveNode1, ram_backbone, get_leader_id, []),
+    LeaderId = rpc:call(SlaveNode1, ram_backbone, get_server_loc, []),
     LeaderNode = ram_backbone:get_node(LeaderId),
     FollowerNodes = [SlaveNode1, SlaveNode2, SlaveNode3] -- [LeaderNode],
     [FollowerNode_A, FollowerNode_B] = FollowerNodes,
@@ -339,7 +339,7 @@ four_nodes_cluster_net_splits(Config) ->
     "value-B" = rpc:call(SlaveNode3, ram, get, ["key"]),
 
     %% partial leader net-split
-    LeaderId1 = rpc:call(FollowerNode_B, ram_backbone, get_leader_id, []),
+    LeaderId1 = rpc:call(FollowerNode_B, ram_backbone, get_server_loc, []),
     LeaderNode1 = ram_backbone:get_node(LeaderId1),
     FollowerNodes1 = [SlaveNode1, SlaveNode2, SlaveNode3] -- [LeaderNode1],
     [FollowerNode1_A, FollowerNode1_B] = FollowerNodes1,

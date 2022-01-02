@@ -30,8 +30,8 @@
 %% API
 -export([start_link/0]).
 -export([make_server_id/1, get_node/1, get_nodes/1]).
--export([get_leader_id/0]).
--export([maybe_update_leader_id/2]).
+-export([get_server_loc/0]).
+-export([maybe_update_server_loc/2]).
 
 %% gen_server callbacks
 -export([
@@ -72,16 +72,16 @@ get_node({ram, ServerId}) ->
 get_nodes(ServerIds) ->
     [get_node(ServerId) || ServerId <- ServerIds].
 
--spec get_leader_id() -> ra:server_id().
-get_leader_id() ->
-    [{leader_id, LeaderId}] = ets:lookup(ram_info, leader_id),
-    LeaderId.
+-spec get_server_loc() -> ra:server_id().
+get_server_loc() ->
+    [{leader_loc, ServerLoc}] = ets:lookup(ram_info, leader_loc),
+    ServerLoc.
 
--spec maybe_update_leader_id(OldServerId :: ra:server_id(), NewServerId :: ra:server_id()) -> true.
-maybe_update_leader_id(OldServerId, NewServerId) ->
-    case NewServerId of
-        OldServerId -> ok;
-        _ -> true = ets:insert(ram_info, {leader_id, NewServerId})
+-spec maybe_update_server_loc(OldServerLoc :: ra:server_id(), NewServerLoc :: ra:server_id()) -> true.
+maybe_update_server_loc(OldServerLoc, NewServerLoc) ->
+    case NewServerLoc of
+        OldServerLoc -> ok;
+        _ -> true = ets:insert(ram_info, {leader_loc, NewServerLoc})
     end.
 
 %% ===================================================================
@@ -99,7 +99,7 @@ maybe_update_leader_id(OldServerId, NewServerId) ->
 init([]) ->
     %% create ets table
     _ = ets:new(ram_info, [set, public, named_table, {read_concurrency, true}, {write_concurrency, true}] ++ ?ETS_OPTIMIZATIONS),
-    true = ets:insert(ram_info, {leader_id, make_server_id(node())}),
+    true = ets:insert(ram_info, {leader_loc, make_server_id(node())}),
     %% init
     {ok, #state{}}.
 
