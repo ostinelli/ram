@@ -41,9 +41,6 @@
 -export([update/3]).
 -export([delete/1]).
 
-%% includes
--include("ram.hrl").
-
 %% ===================================================================
 %% API
 %% ===================================================================
@@ -65,24 +62,25 @@ stop() ->
 -spec start_cluster([node()]) -> ok | {error, Reason :: term()}.
 start_cluster(Nodes) ->
     %% init
-    ServerIds = [{?CLUSTER_NAME, N} || N <- Nodes],
+    ServerIds = [ram_backbone:make_server_id(Node) || Node <- Nodes],
     Machine = {module, ram_kv, #{}},
     %% start ra
     lists:foreach(fun(Node) ->
         ok = rpc:call(Node, ra, start, [])
     end, Nodes),
     %% start cluster
-    case ra:start_cluster(default, ?CLUSTER_NAME, Machine, ServerIds) of
+    case ra:start_cluster(default, ram, Machine, ServerIds) of
         {ok, StartedIds, _NotStartedIds} when length(StartedIds) =:= length(Nodes) ->
-            error_logger:info_msg("RAM[~s] Cluster started on ~p", [node(), ServerIds]),
+            error_logger:info_msg("RAM[~s] Cluster started on ~p", [node(), ram_backbone:get_nodes(ServerIds)]),
             ok;
 
         {ok, StartedIds, NotStartedIds} ->
-            error_logger:warning_msg("RAM[~s] Cluster started on ~p but but not on ~p", [node(), StartedIds, NotStartedIds]),
+            error_logger:warning_msg("RAM[~s] Cluster started on ~p but but not on ~p",
+                [node(), ram_backbone:get_nodes(StartedIds), ram_backbone:get_nodes(NotStartedIds)]),
             ok;
 
         {error, Reason} ->
-            error_logger:error_msg("RAM[~s] Could not start cluster on ~p: ~p", [node(), ServerIds, Reason]),
+            error_logger:error_msg("RAM[~s] Could not start cluster on ~p: ~p", [node(), ram_backbone:get_nodes(ServerIds), Reason]),
             {error, Reason}
     end.
 
@@ -90,14 +88,14 @@ start_cluster(Nodes) ->
 -spec stop_cluster([node()]) -> ok | {error, Reason :: term()}.
 stop_cluster(Nodes) ->
     %% init
-    ServerIds = [{?CLUSTER_NAME, N} || N <- Nodes],
+    ServerIds = [ram_backbone:make_server_id(Node) || Node <- Nodes],
     case ra:delete_cluster(ServerIds) of
         {ok, _LeaderId} ->
-            error_logger:info_msg("RAM[~s] Cluster stopped on ~p", [node(), ServerIds]),
+            error_logger:info_msg("RAM[~s] Cluster stopped on ~p", [node(), ram_backbone:get_nodes(ServerIds)]),
             ok;
 
         {error, Reason} ->
-            error_logger:error_msg("RAM[~s] Could not stop cluster on ~p: ~p", [node(), ServerIds, Reason]),
+            error_logger:error_msg("RAM[~s] Could not stop cluster on ~p: ~p", [node(), ram_backbone:get_nodes(ServerIds), Reason]),
             {error, Reason}
     end.
 

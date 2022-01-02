@@ -38,10 +38,12 @@
 -export([
     three_nodes_operations/1
 ]).
+-export([
+    four_nodes_cluster_net_splits/1
+]).
 
 %% include
 -include_lib("common_test/include/ct.hrl").
--include("../src/ram.hrl").
 
 %% ===================================================================
 %% Callbacks
@@ -57,7 +59,8 @@
 all() ->
     [
         {group, one_node},
-        {group, three_nodes}
+        {group, three_nodes},
+        {group, four_nodes}
     ].
 
 %% -------------------------------------------------------------------
@@ -79,6 +82,9 @@ groups() ->
         ]},
         {three_nodes, [shuffle], [
             three_nodes_operations
+        ]},
+        {four_nodes, [shuffle], [
+            four_nodes_cluster_net_splits
         ]}
     ].
 %% -------------------------------------------------------------------
@@ -108,6 +114,8 @@ end_per_suite(_Config) ->
 %% -------------------------------------------------------------------
 init_per_group(three_nodes, Config) ->
     do_init_per_group(three_nodes, 3, Config);
+init_per_group(four_nodes, Config) ->
+    do_init_per_group(four_nodes, 4, Config);
 init_per_group(_GroupName, Config) ->
     Config.
 
@@ -129,6 +137,8 @@ do_init_per_group(GroupName, Count, Config) ->
 %% -------------------------------------------------------------------
 end_per_group(three_nodes, Config) ->
     ram_test_suite_helper:end_cluster(3, Config);
+end_per_group(four_nodes, Config) ->
+    ram_test_suite_helper:end_cluster(4, Config);
 end_per_group(_GroupName, _Config) ->
     ram_test_suite_helper:clean_after_test().
 
@@ -237,3 +247,79 @@ three_nodes_operations(Config) ->
 
     %% stop cluster
     ok = ram:stop_cluster([node(), SlaveNode1, SlaveNode2]).
+
+four_nodes_cluster_net_splits(Config) ->
+    %% get slaves
+    SlaveNode1 = proplists:get_value(ram_slave_1, Config),
+    SlaveNode2 = proplists:get_value(ram_slave_2, Config),
+    SlaveNode3 = proplists:get_value(ram_slave_3, Config),
+
+    %% start ram
+    ok = rpc:call(SlaveNode1, ram, start, []),
+    ok = rpc:call(SlaveNode2, ram, start, []),
+    ok = rpc:call(SlaveNode3, ram, start, []),
+
+    %% create cluster
+    ok = ram:start_cluster([SlaveNode1, SlaveNode2, SlaveNode3]),
+
+    %% put
+    ok = rpc:call(SlaveNode1, ram, put, ["key", "value"]),
+
+    %% retrieve
+    "value" = rpc:call(SlaveNode1, ram, get, ["key"]),
+    "value" = rpc:call(SlaveNode2, ram, get, ["key"]),
+    "value" = rpc:call(SlaveNode3, ram, get, ["key"]),
+
+    LeaderId = rpc:call(SlaveNode1, ram_backbone, get_leader_id, []),
+    LeaderNode = ram_backbone:get_node(LeaderId),
+    FollowerNodes = [SlaveNode1, SlaveNode2, SlaveNode3] -- [LeaderNode],
+    [FollowerNode_A, FollowerNode_B] = FollowerNodes,
+
+    %% disconnect leader node from other two
+    lists:foreach(fun(OtherNode) ->
+        rpc:call(LeaderNode, ram_test_suite_helper, disconnect_node, [OtherNode])
+    end, FollowerNodes),
+
+    %% retrieve
+    {badrpc, {'EXIT', {{ram, {timeout, LeaderId}}, _}}} = (catch rpc:call(LeaderNode, ram, get, ["key"])),
+    "value" = rpc:call(FollowerNode_A, ram, get, ["key"]),
+    "value" = rpc:call(FollowerNode_B, ram, get, ["key"]),
+
+    %% put while split
+    [FollowerNode_A, FollowerNode_B] = FollowerNodes,
+    ok = rpc:call(FollowerNode_A, ram, put, ["key", "value-A"]),
+    ok = rpc:call(FollowerNode_B, ram, put, ["key", "value-B"]),
+
+    %% rejoin
+    lists:foreach(fun(OtherNode) ->
+        rpc:call(LeaderNode, ram_test_suite_helper, connect_node, [OtherNode])
+    end, FollowerNodes),
+
+    %% retrieve
+    "value-B" = rpc:call(SlaveNode1, ram, get, ["key"]),
+    "value-B" = rpc:call(SlaveNode2, ram, get, ["key"]),
+    "value-B" = rpc:call(SlaveNode3, ram, get, ["key"]),
+
+    %% partial leader net-split
+    LeaderId1 = rpc:call(FollowerNode_B, ram_backbone, get_leader_id, []),
+    LeaderNode1 = ram_backbone:get_node(LeaderId1),
+    FollowerNodes1 = [SlaveNode1, SlaveNode2, SlaveNode3] -- [LeaderNode1],
+    [FollowerNode1_A, FollowerNode1_B] = FollowerNodes1,
+
+    rpc:call(LeaderNode1, ram_test_suite_helper, disconnect_node, [FollowerNode1_A]),
+
+    %% retrieve
+    "value-B" = rpc:call(LeaderNode1, ram, get, ["key"]),
+    {badrpc, {'EXIT', {{ram, nodedown}, _}}} = (catch rpc:call(FollowerNode1_A, ram, get, ["key"])),
+    "value-B" = rpc:call(FollowerNode1_B, ram, get, ["key"]),
+
+    %% reconnect
+    rpc:call(LeaderNode1, ram_test_suite_helper, connect_node, [FollowerNode1_A]),
+
+    %% retrieve
+    "value-B" = rpc:call(SlaveNode1, ram, get, ["key"]),
+    "value-B" = rpc:call(SlaveNode2, ram, get, ["key"]),
+    "value-B" = rpc:call(SlaveNode3, ram, get, ["key"]),
+
+    %% stop cluster
+    ok = ram:stop_cluster([SlaveNode1, SlaveNode2, SlaveNode3]).

@@ -42,7 +42,6 @@
 {update, Key :: term(), Default :: term(), UpdateFun :: function()} |
 {delete, Key :: term()}.
 
-
 %% ===================================================================
 %% API
 %% ===================================================================
@@ -83,17 +82,14 @@ process_command(Command) ->
     LeaderId = ram_backbone:get_leader_id(),
     case ra:process_command(LeaderId, Command) of
         {ok, Reply, NewLeaderId} ->
-            case NewLeaderId of
-                LeaderId -> ok;
-                _ -> ram_backbone:set_leader_id(NewLeaderId)
-            end,
+            ram_backbone:maybe_update_leader_id(LeaderId, NewLeaderId),
             Reply;
 
         {error, Reason} ->
             error({ram, Reason});
 
-        {timeout, ServerId} ->
-            error({ram, {timeout, ServerId}})
+        {timeout, LeaderId} ->
+            error({ram, {timeout, LeaderId}})
     end.
 
 %% ===================================================================

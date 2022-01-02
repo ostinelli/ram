@@ -29,8 +29,9 @@
 
 %% API
 -export([start_link/0]).
+-export([make_server_id/1, get_node/1, get_nodes/1]).
 -export([get_leader_id/0]).
--export([set_leader_id/1]).
+-export([maybe_update_leader_id/2]).
 
 %% gen_server callbacks
 -export([
@@ -44,9 +45,6 @@
 
 %% records
 -record(state, {}).
-
-%% includes
--include("ram.hrl").
 
 - if (?OTP_RELEASE >= 23).
 -define(ETS_OPTIMIZATIONS, [{decentralized_counters, true}]).
@@ -62,14 +60,29 @@ start_link() ->
     Options = [],
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], Options).
 
+-spec make_server_id(node()) -> ra:server_id().
+make_server_id(Node) ->
+    {ram, Node}.
+
+-spec get_node(ra:server_id()) -> node().
+get_node({ram, ServerId}) ->
+    ServerId.
+
+-spec get_nodes([ra:server_id()]) -> [node()].
+get_nodes(ServerIds) ->
+    [get_node(ServerId) || ServerId <- ServerIds].
+
 -spec get_leader_id() -> ra:server_id().
 get_leader_id() ->
     [{leader_id, LeaderId}] = ets:lookup(ram_info, leader_id),
     LeaderId.
 
--spec set_leader_id(ra:server_id()) -> true.
-set_leader_id(ServerId) ->
-    true = ets:insert(ram_info, {leader_id, ServerId}).
+-spec maybe_update_leader_id(OldServerId :: ra:server_id(), NewServerId :: ra:server_id()) -> true.
+maybe_update_leader_id(OldServerId, NewServerId) ->
+    case NewServerId of
+        OldServerId -> ok;
+        _ -> true = ets:insert(ram_info, {leader_id, NewServerId})
+    end.
 
 %% ===================================================================
 %% Callbacks
@@ -86,7 +99,7 @@ set_leader_id(ServerId) ->
 init([]) ->
     %% create ets table
     _ = ets:new(ram_info, [set, public, named_table, {read_concurrency, true}, {write_concurrency, true}] ++ ?ETS_OPTIMIZATIONS),
-    true = ets:insert(ram_info, {leader_id, {ram, node()}}),
+    true = ets:insert(ram_info, {leader_id, make_server_id(node())}),
     %% init
     {ok, #state{}}.
 
