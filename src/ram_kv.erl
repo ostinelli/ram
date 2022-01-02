@@ -81,8 +81,7 @@ delete(Key) ->
 process_command(Command) ->
     ServerLoc = ram_backbone:get_server_loc(),
     case ra:process_command(ServerLoc, Command) of
-        {ok, Reply, NewServerLoc} ->
-            ram_backbone:maybe_update_server_loc(ServerLoc, NewServerLoc),
+        {ok, Reply, _NewServerLoc} ->
             Reply;
 
         {error, Reason} ->

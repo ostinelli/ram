@@ -2,7 +2,9 @@
     [
         {description, "An in-memory distributed KV store for Erlang and Elixir."},
         {vsn, "0.1.0"},
-        {registered, []},
+        {registered, [
+            ram_sup
+        ]},
         {applications, [
             kernel,
             stdlib,

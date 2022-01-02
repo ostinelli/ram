@@ -36,7 +36,7 @@
 %% API
 -export([start/0, stop/0]).
 -export([start_cluster/1, stop_cluster/1]).
--export([add_node/2]).
+-export([add_node/2, remove_node/2, nodes/0]).
 -export([get/1, get/2, fetch/1]).
 -export([put/2]).
 -export([update/3]).
@@ -62,70 +62,24 @@ stop() ->
 %% @doc Starts the Ram cluster.
 -spec start_cluster([node()]) -> ok | {error, Reason :: term()}.
 start_cluster(Nodes) ->
-    %% init
-    ServerIds = [ram_backbone:make_server_id(Node) || Node <- Nodes],
-    Machine = {module, ram_kv, #{}},
-    %% start ra
-    lists:foreach(fun(Node) ->
-        ok = rpc:call(Node, ra, start, [])
-    end, Nodes),
-    %% start cluster
-    case ra:start_cluster(default, ram, Machine, ServerIds) of
-        {ok, StartedIds, _NotStartedIds} when length(StartedIds) =:= length(Nodes) ->
-            error_logger:info_msg("RAM[~s] Cluster started on ~p", [node(), ram_backbone:get_nodes(ServerIds)]),
-            ok;
-
-        {ok, StartedIds, NotStartedIds} ->
-            error_logger:warning_msg("RAM[~s] Cluster started on ~p but but not on ~p",
-                [node(), ram_backbone:get_nodes(StartedIds), ram_backbone:get_nodes(NotStartedIds)]),
-            ok;
-
-        {error, Reason} ->
-            error_logger:error_msg("RAM[~s] Could not start cluster on ~p: ~p", [node(), ram_backbone:get_nodes(ServerIds), Reason]),
-            {error, Reason}
-    end.
+    ram_backbone:start_cluster(Nodes).
 
 %% @doc Stops the Ram cluster.
 -spec stop_cluster([node()]) -> ok | {error, Reason :: term()}.
 stop_cluster(Nodes) ->
-    %% init
-    ServerIds = [ram_backbone:make_server_id(Node) || Node <- Nodes],
-    case ra:delete_cluster(ServerIds) of
-        {ok, _ServerLoc} ->
-            error_logger:info_msg("RAM[~s] Cluster stopped on ~p", [node(), ram_backbone:get_nodes(ServerIds)]),
-            ok;
-
-        {error, Reason} ->
-            error_logger:error_msg("RAM[~s] Could not stop cluster on ~p: ~p", [node(), ram_backbone:get_nodes(ServerIds), Reason]),
-            {error, Reason}
-    end.
+    ram_backbone:stop_cluster(Nodes).
 
 -spec add_node(Node :: node(), RefNode :: node()) -> ok | {error, Reason :: term()}.
 add_node(Node, RefNode) ->
-    %% init
-    ServerId = ram_backbone:make_server_id(Node),
-    ServerLoc = ram_backbone:make_server_id(RefNode),
-    %% start ra
-    ok = rpc:call(Node, ra, start, []),
-    %% add
-    case ra:add_member(ServerLoc, ServerId) of
-        {ok, _, NewServerLoc} ->
-            ram_backbone:maybe_update_server_loc(ServerLoc, NewServerLoc),
-            Machine = {module, ram_kv, #{}},
-            case ra:start_server(default, ram, ServerId, Machine, [ServerLoc]) of
-                ok ->
-                    error_logger:info_msg("RAM[~s] Node ~s added to cluster", [node(), Node]),
-                    ok;
+    ram_backbone:add_node(Node, RefNode).
 
-                {error, Reason} ->
-                    error_logger:error_msg("RAM[~s] Error addding node ~s to cluster: ~p", [node(), Node, Reason]),
-                    {error, Reason}
-            end;
+-spec remove_node(Node :: node(), RefNode :: node()) -> ok | {error, Reason :: term()}.
+remove_node(Node, RefNode) ->
+    ram_backbone:remove_node(Node, RefNode).
 
-        {error, Reason} ->
-            error_logger:error_msg("RAM[~s] Error addding node ~s to cluster: ~p", [node(), Node, Reason]),
-            {error, Reason}
-    end.
+-spec nodes() -> [node()].
+nodes() ->
+    ram_backbone:nodes().
 
 %% @equiv get(Key, undefined)
 %% @end

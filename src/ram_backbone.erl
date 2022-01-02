@@ -25,133 +25,140 @@
 %% ==========================================================================================================
 %% @private
 -module(ram_backbone).
--behaviour(gen_server).
 
 %% API
--export([start_link/0]).
--export([make_server_id/1, get_node/1, get_nodes/1]).
+-export([start_cluster/1, stop_cluster/1]).
+-export([add_node/2, remove_node/2, nodes/0]).
 -export([get_server_loc/0]).
--export([maybe_update_server_loc/2]).
 
-%% gen_server callbacks
--export([
-    init/1,
-    handle_call/3,
-    handle_cast/2,
-    handle_info/2,
-    terminate/2,
-    code_change/3
-]).
-
-%% records
--record(state, {}).
-
-- if (?OTP_RELEASE >= 23).
--define(ETS_OPTIMIZATIONS, [{decentralized_counters, true}]).
--else.
--define(ETS_OPTIMIZATIONS, []).
+%% tests
+-ifdef(TEST).
+-export([get_node_from_server_id/1]).
 -endif.
 
+%% macros
+-define(SYSTEM, default).
+-define(CLUSTER_NAME, ram).
+-define(RA_MACHINE,  {module, ram_kv, #{}}).
+
 %% ===================================================================
 %% API
 %% ===================================================================
--spec start_link() -> {ok, pid()} | {error, term()}.
-start_link() ->
-    Options = [],
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [], Options).
+-spec start_cluster([node()]) -> ok | {error, Reason :: term()}.
+start_cluster(Nodes) ->
+    %% init
+    ServerIds = [make_server_id(Node) || Node <- Nodes],
+    %% start ra
+    lists:foreach(fun(Node) ->
+        ok = rpc:call(Node, ra, start, [])
+    end, Nodes),
+    %% start cluster
+    case ra:start_cluster(?SYSTEM, ?CLUSTER_NAME, ?RA_MACHINE, ServerIds) of
+        {ok, StartedIds, _NotStartedIds} when length(StartedIds) =:= length(Nodes) ->
+            error_logger:info_msg("RAM[~s] Cluster started on ~p", [node(), get_nodes_from_server_ids(ServerIds)]),
+            ok;
 
+        {ok, StartedIds, NotStartedIds} ->
+            error_logger:warning_msg("RAM[~s] Cluster started on ~p but but not on ~p",
+                [node(), get_nodes_from_server_ids(StartedIds), get_nodes_from_server_ids(NotStartedIds)]),
+            ok;
+
+        {error, Reason} ->
+            error_logger:error_msg("RAM[~s] Could not start cluster on ~p: ~p", [node(), get_nodes_from_server_ids(ServerIds), Reason]),
+            {error, Reason}
+    end.
+
+%% @doc Stops the Ram cluster.
+-spec stop_cluster([node()]) -> ok | {error, Reason :: term()}.
+stop_cluster(Nodes) ->
+    %% init
+    ServerIds = [make_server_id(Node) || Node <- Nodes],
+    case ra:delete_cluster(ServerIds) of
+        {ok, _ServerLoc} ->
+            error_logger:info_msg("RAM[~s] Cluster stopped on ~p", [node(), get_nodes_from_server_ids(ServerIds)]),
+            ok;
+
+        {error, Reason} ->
+            error_logger:error_msg("RAM[~s] Could not stop cluster on ~p: ~p", [node(), get_nodes_from_server_ids(ServerIds), Reason]),
+            {error, Reason}
+    end.
+
+-spec add_node(Node :: node(), RefNode :: node()) -> ok | {error, Reason :: term()}.
+add_node(Node, RefNode) ->
+    %% init
+    ServerLoc = make_server_id(RefNode),
+    ServerId = make_server_id(Node),
+    %% start ra
+    ok = rpc:call(Node, ra, start, []),
+    %% add
+    case ra:add_member(ServerLoc, ServerId) of
+        {ok, _, _NewServerLoc} ->
+            case ra:start_server(?SYSTEM, ?CLUSTER_NAME, ServerId, ?RA_MACHINE, [ServerLoc]) of
+                ok ->
+                    error_logger:info_msg("RAM[~s] Node ~s added to cluster", [node(), Node]),
+                    ok;
+
+                {error, Reason} ->
+                    error_logger:error_msg("RAM[~s] Error addding node ~s to cluster: ~p", [node(), Node, Reason]),
+                    {error, Reason}
+            end;
+
+        {error, Reason} ->
+            error_logger:error_msg("RAM[~s] Error addding node ~s to cluster: ~p", [node(), Node, Reason]),
+            {error, Reason}
+    end.
+
+-spec remove_node(Node :: node(), RefNode :: node()) -> ok | {error, Reason :: term()}.
+remove_node(Node, RefNode) ->
+    %% init
+    ServerLoc = make_server_id(RefNode),
+    ServerId = make_server_id(Node),
+    %% remove
+    case ra:leave_and_delete_server(?SYSTEM, ServerLoc, ServerId) of
+        ok ->
+            error_logger:info_msg("RAM[~s] Node ~s removed from cluster", [node(), Node]),
+            ok;
+
+        timeout ->
+            error_logger:error_msg("RAM[~s] Timeout removing node ~s from cluster", [node(), Node]),
+            {error, timeout};
+
+        {error, Reason} ->
+            error_logger:error_msg("RAM[~s] Error removing node ~s from cluster: ~p", [node(), Node, Reason]),
+            {error, Reason};
+
+        {badrpc, Reason} ->
+            error_logger:error_msg("RAM[~s] badrpc error removing node ~s from cluster: ~p", [node(), Node, Reason]),
+            {error, Reason}
+    end.
+
+-spec nodes() -> [node()].
+nodes() ->
+    ServerId = make_server_id(node()),
+    case ra:members(ServerId) of
+        {ok, ServerIds, _} ->
+            get_nodes_from_server_ids(ServerIds);
+
+        {error, Reason} ->
+            error_logger:error_msg("RAM[~s] Failed to retrieve members: ~p", [node(), Reason]),
+            {error, Reason}
+    end.
+
+-spec get_server_loc() -> ra:server_id().
+get_server_loc() ->
+    make_server_id(node()).
+
+%% ===================================================================
+%% Internals
+%% ===================================================================
 -spec make_server_id(node()) -> ra:server_id().
 make_server_id(Node) ->
     {ram, Node}.
 
--spec get_node(ra:server_id()) -> node().
-get_node({ram, ServerId}) ->
-    ServerId.
+-spec get_node_from_server_id(ra:server_id()) -> node().
+get_node_from_server_id({ram, Node}) ->
+    Node.
 
--spec get_nodes([ra:server_id()]) -> [node()].
-get_nodes(ServerIds) ->
-    [get_node(ServerId) || ServerId <- ServerIds].
-
--spec get_server_loc() -> ra:server_id().
-get_server_loc() ->
-    [{leader_loc, ServerLoc}] = ets:lookup(ram_info, leader_loc),
-    ServerLoc.
-
--spec maybe_update_server_loc(OldServerLoc :: ra:server_id(), NewServerLoc :: ra:server_id()) -> true.
-maybe_update_server_loc(OldServerLoc, NewServerLoc) ->
-    case NewServerLoc of
-        OldServerLoc -> ok;
-        _ -> true = ets:insert(ram_info, {leader_loc, NewServerLoc})
-    end.
-
-%% ===================================================================
-%% Callbacks
-%% ===================================================================
-
-%% ----------------------------------------------------------------------------------------------------------
-%% Init
-%% ----------------------------------------------------------------------------------------------------------
--spec init([]) ->
-    {ok, #state{}} |
-    {ok, #state{}, Timeout :: non_neg_integer()} |
-    ignore |
-    {stop, Reason :: term()}.
-init([]) ->
-    %% create ets table
-    _ = ets:new(ram_info, [set, public, named_table, {read_concurrency, true}, {write_concurrency, true}] ++ ?ETS_OPTIMIZATIONS),
-    true = ets:insert(ram_info, {leader_loc, make_server_id(node())}),
-    %% init
-    {ok, #state{}}.
-
-%% ----------------------------------------------------------------------------------------------------------
-%% Call messages
-%% ----------------------------------------------------------------------------------------------------------
--spec handle_call(Request :: term(), From :: term(), #state{}) ->
-    {reply, Reply :: term(), #state{}} |
-    {reply, Reply :: term(), #state{}, Timeout :: non_neg_integer()} |
-    {noreply, #state{}} |
-    {noreply, #state{}, Timeout :: non_neg_integer()} |
-    {stop, Reason :: term(), Reply :: term(), #state{}} |
-    {stop, Reason :: term(), #state{}}.
-handle_call(Request, From, State) ->
-    error_logger:warning_msg("RAM[~s] Received from ~p an unknown call message: ~p", [node(), From, Request]),
-    {reply, undefined, State}.
-
-%% ----------------------------------------------------------------------------------------------------------
-%% Cast messages
-%% ----------------------------------------------------------------------------------------------------------
--spec handle_cast(Msg :: term(), #state{}) ->
-    {noreply, #state{}} |
-    {noreply, #state{}, Timeout :: non_neg_integer()} |
-    {stop, Reason :: term(), #state{}}.
-handle_cast(Msg, State) ->
-    error_logger:warning_msg("RAM[~s] Received an unknown cast message: ~p", [node(), Msg]),
-    {noreply, State}.
-
-%% ----------------------------------------------------------------------------------------------------------
-%% All non Call / Cast messages
-%% ----------------------------------------------------------------------------------------------------------
--spec handle_info(Info :: term(), #state{}) ->
-    {noreply, #state{}} |
-    {noreply, #state{}, Timeout :: non_neg_integer()} |
-    {stop, Reason :: term(), #state{}}.
-handle_info(Info, State) ->
-    error_logger:warning_msg("RAM[~s] Received an unknown info message: ~p", [node(), Info]),
-    {noreply, State}.
-
-%% ----------------------------------------------------------------------------------------------------------
-%% Terminate
-%% ----------------------------------------------------------------------------------------------------------
--spec terminate(Reason :: term(), #state{}) -> terminated.
-terminate(Reason, _State) ->
-    error_logger:info_msg("RAM[~s] Terminating with reason: ~p", [node(), Reason]),
-    true = ets:delete(ram_info),
-    %% return
-    terminated.
-
-%% ----------------------------------------------------------------------------------------------------------
-%% Convert process state when code is changed.
-%% ----------------------------------------------------------------------------------------------------------
--spec code_change(OldVsn :: term(), #state{}, Extra :: term()) -> {ok, #state{}}.
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
+-spec get_nodes_from_server_ids([ra:server_id()]) -> [node()].
+get_nodes_from_server_ids(ServerIds) ->
+    [get_node_from_server_id(ServerId) || ServerId <- ServerIds].
