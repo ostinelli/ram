@@ -27,22 +27,64 @@
 -module(ram_event_handler).
 
 %% API
+-export([ensure_event_handler_loaded/0]).
 -export([do_resolve_conflict/3]).
+
+-callback resolve_conflict(
+    Key :: term(),
+    {Node1 :: node(), Value1 :: term(), Time1 :: non_neg_integer()},
+    {Node2 :: node(), Value2 :: term(), Time2 :: non_neg_integer()}
+) -> ValueToKeep :: term().
+
+-optional_callbacks([resolve_conflict/3]).
 
 %% ===================================================================
 %% API
 %% ===================================================================
 %% @private
+-spec ensure_event_handler_loaded() -> ok.
+ensure_event_handler_loaded() ->
+    %% get handler
+    CustomEventHandler = get_custom_event_handler(),
+    %% ensure that is it loaded (not using code:ensure_loaded/1 to support embedded mode)
+    catch CustomEventHandler:module_info(exports),
+    ok.
+
+
+%% @private
 -spec do_resolve_conflict(
     Key :: term(),
-    {Node1 :: node(), Value1 :: term(), Time1 :: non_neg_integer(), Deleted1 :: boolean()},
-    {Node2 :: node(), Value2 :: term(), Time2 :: non_neg_integer(), Deleted1 :: boolean()}
-) -> {ok, ValueToKeep :: term(), DeletedToKeep :: boolean()}.
-do_resolve_conflict(_Key, {_Node1, Value1, Time1, Deleted1}, {_Node2, Value2, Time2, Deleted2}) ->
-    %% by default, keep value registered more recently
-    %% NB: this is a simple mechanism that can be imprecise
-    {ValueToKeep, DeletedToKeep} = case Time1 > Time2 of
-        true -> {Value1, Deleted1};
-        _ -> {Value2, Deleted2}
-    end,
-    {ok, ValueToKeep, DeletedToKeep}.
+    {Node1 :: node(), Value1 :: term(), Time1 :: non_neg_integer()},
+    {Node2 :: node(), Value2 :: term(), Time2 :: non_neg_integer()}
+) -> {ok, ValueToKeep :: term()} | error.
+do_resolve_conflict(Key, {Node1, Value1, Time1}, {Node2, Value2, Time2}) ->
+    CustomEventHandler = get_custom_event_handler(),
+    case erlang:function_exported(CustomEventHandler, resolve_conflict, 3) of
+        true ->
+            try
+                Value = CustomEventHandler:resolve_conflict(Key, {Node1, Value1, Time1}, {Node2, Value2, Time2}),
+                {ok, Value}
+            catch Class:Reason ->
+                error_logger:error_msg(
+                    "RAM[~s] Error ~p in custom handler resolve_conflict: ~p",
+                    [node(), Class, Reason]
+                ),
+                error
+            end;
+
+        _ ->
+            %% by default, keep value registered more recently
+            %% NB: this is a simple mechanism that can be imprecise
+            ValueToKeep = case Time1 > Time2 of
+                true -> Value1;
+                _ -> Value2
+            end,
+            {ok, ValueToKeep}
+    end.
+
+%% ===================================================================
+%% Internal
+%% ===================================================================
+-spec get_custom_event_handler() -> undefined | {ok, CustomEventHandler :: atom()}.
+get_custom_event_handler() ->
+    application:get_env(ram, event_handler, undefined).

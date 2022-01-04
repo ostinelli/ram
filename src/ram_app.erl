@@ -38,6 +38,8 @@
     StartArgs :: term()
 ) -> {ok, pid()} | {ok, pid(), State :: term()} | {error, term()}.
 start(_StartType, _StartArgs) ->
+    %% ensure event handler is loaded
+    ram_event_handler:ensure_event_handler_loaded(),
     %% start main sup
     ram_sup:start_link().
 

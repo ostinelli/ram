@@ -123,12 +123,6 @@ start() ->
     init:stop().
 
 put_on_node(CollectorPid, WorkersPerNode, FromKey, ToKey) ->
-    do_on_node(CollectorPid, fun worker_put_on_node/2, "Put", WorkersPerNode, FromKey, ToKey).
-
-get_on_node(CollectorPid, WorkersPerNode, FromKey, ToKey) ->
-    do_on_node(CollectorPid, fun worker_get_on_node/2, "Get", WorkersPerNode, FromKey, ToKey).
-
-do_on_node(CollectorPid, Fun, Desc, WorkersPerNode, FromKey, ToKey) ->
     Count = ToKey - FromKey + 1,
     %% spawn workers
     KeysPerNode = ceil(Count / WorkersPerNode),
@@ -138,14 +132,33 @@ do_on_node(CollectorPid, Fun, Desc, WorkersPerNode, FromKey, ToKey) ->
         WorkerToKey = lists:min([WorkerFromKey + KeysPerNode - 1, ToKey]),
         spawn(fun() ->
             StartAt = os:system_time(millisecond),
-            Fun(WorkerFromKey, WorkerToKey),
+            worker_put_on_node(WorkerFromKey, WorkerToKey),
             Time = (os:system_time(millisecond) - StartAt) / 1000,
             ReplyPid ! {done, Time}
         end)
     end, lists:seq(1, WorkersPerNode)),
     %% wait
     Time = wait_done_on_node(CollectorPid, 0, WorkersPerNode),
-    io:format("----> ~s on node ~p on ~p secs.~n", [Desc, node(), Time]).
+    io:format("----> Put on node ~p on ~p secs.~n", [node(), Time]).
+
+get_on_node(CollectorPid, WorkersPerNode, FromKey, ToKey) ->
+    Count = ToKey - FromKey + 1,
+    %% spawn workers
+    KeysPerNode = ceil(Count / WorkersPerNode),
+    ReplyPid = self(),
+    lists:foreach(fun(I) ->
+        WorkerFromKey = FromKey + (I - 1) * KeysPerNode,
+        WorkerToKey = lists:min([WorkerFromKey + KeysPerNode - 1, ToKey]),
+        spawn(fun() ->
+            StartAt = os:system_time(millisecond),
+            worker_get_on_node(WorkerFromKey, WorkerToKey),
+            Time = (os:system_time(millisecond) - StartAt) / 1000,
+            ReplyPid ! {done, Time}
+        end)
+    end, lists:seq(1, WorkersPerNode)),
+    %% wait
+    Time = wait_done_on_node(CollectorPid, 0, WorkersPerNode),
+    io:format("----> Put on node ~p on ~p secs.~n", [node(), Time]).
 
 worker_put_on_node(Key, WorkerToKey) when Key =< WorkerToKey ->
     ok = ram:put(Key, Key),

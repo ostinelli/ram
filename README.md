@@ -4,9 +4,12 @@
 **Ram** is an in-memory distributed KV store for Erlang and Elixir, able to automatically manage dynamic clusters
 (addition / removal of nodes) and to recover from net splits.
 
-Ram is an experiment on supporting dynamic clusters automatically, and it might remain one.
+Ram operations are **A**tomic (take effect on all nodes involved, or on none of the nodes),
+**C**onsistent (the data is the same across all nodes)
+and **I**solated (operations on different nodes in a network do not interfere with each other).
+They are not **D**urable since Ram is an in-memory only database. 
 
-Internally, Ram operations use global locks and transactions with a 2-phase commit.
+Ram is at an early development stage.
 
 [[Documentation](https://hexdocs.pm/ram/)]
 
@@ -17,7 +20,7 @@ Add it to your deps:
 
 ```elixir
 defp deps do
-  [{:ram, "~> 0.2"}]
+  [{:ram, "~> 0.1"}]
 end
 ```
 
@@ -26,14 +29,14 @@ If you're using [rebar3](https://github.com/erlang/rebar3), add `ram` as a depen
 
 ```erlang
 {deps, [
-  {ram, {git, "git://github.com/ostinelli/ram.git", {tag, "0.2.0"}}}
+  {ram, {git, "git://github.com/ostinelli/ram.git", {tag, "0.1.0"}}}
 ]}.
 ```
 Or, if you're using [Hex.pm](https://hex.pm/) as package manager (with the [rebar3_hex](https://github.com/hexpm/rebar3_hex) plugin):
 
 ```erlang
 {deps, [
-  {ram, "0.2.0"}
+  {ram, "0.1.0"}
 ]}.
 ```
 
