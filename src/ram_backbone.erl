@@ -123,13 +123,9 @@ remove_node(Node, RefNode) ->
             error_logger:error_msg("RAM[~s] Timeout removing node ~s from cluster", [node(), Node]),
             {error, timeout};
 
-        {error, Reason} ->
-            error_logger:error_msg("RAM[~s] Error removing node ~s from cluster: ~p", [node(), Node, Reason]),
-            {error, Reason};
-
-        {badrpc, Reason} ->
-            error_logger:error_msg("RAM[~s] badrpc error removing node ~s from cluster: ~p", [node(), Node, Reason]),
-            {error, Reason}
+        Err ->
+            error_logger:error_msg("RAM[~s] Error removing node ~s from cluster: ~p", [node(), Node, Err]),
+            {error, Err}
     end.
 
 -spec nodes() -> [node()].
