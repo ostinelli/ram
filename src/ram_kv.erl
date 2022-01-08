@@ -96,19 +96,33 @@ init(_Config) ->
 %% ----------------------------------------------------------------------------------------------------------
 -spec apply(ra:command_meta_data(), ram_kv_command(), map()) ->
     {map(), term(), ra_machine:effects()} | {map(), term()}.
-apply(_Meta, {put, Key, Value}, State) ->
-    Effects = [],
-    {maps:put(Key, Value, State), ok, Effects};
-apply(_Meta, {fetch, Key}, State) ->
-    Effects = [],
+apply(#{index := Index} = _Meta, {put, Key, Value}, State) ->
+    State1 = maps:put(Key, Value, State),
+    Effects = side_effects(Index, State1),
+    {State1, ok, Effects};
+apply(#{index := Index} =_Meta, {fetch, Key}, State) ->
+    Effects = side_effects(Index, State),
     {State, maps:find(Key, State), Effects};
-apply(_Meta, {update, Key, Default, Fun}, State) ->
+apply(#{index := Index} =_Meta, {update, Key, Default, Fun}, State) ->
     Value = case maps:find(Key, State) of
         error -> Default;
         {ok, V} -> Fun(V)
     end,
-    Effects = [],
-    {maps:put(Key, Value, State), ok, Effects};
-apply(_Meta, {delete, Key}, State) ->
-    Effects = [],
-    {maps:remove(Key, State), ok, Effects}.
+    State1 = maps:put(Key, Value, State),
+    Effects = side_effects(Index, State1),
+    {State1, ok, Effects};
+apply(#{index := Index} =_Meta, {delete, Key}, State) ->
+    State1 = maps:remove(Key, State),
+    Effects = side_effects(Index, State1),
+    {State1, ok, Effects}.
+
+%% ===================================================================
+%% Internals
+%% ===================================================================
+-spec side_effects(ra:index(), map()) -> [ra_machine:effects()].
+side_effects(Index, State) ->
+    ApplyResetCount = application:get_env(ram, release_cursor_count, 1000),
+    case Index rem ApplyResetCount of
+        0 -> [{release_cursor, Index, State}];
+        _ -> []
+    end.

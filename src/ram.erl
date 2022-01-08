@@ -139,6 +139,10 @@ put(Key, Value) ->
 %% If Key is found then the existing Value is passed to the fun and its result is used as the updated Value of Key.
 %% If Key is not found, Default is put as the Value of Key. The Default value will not be passed through the update function.
 %%
+%% <div style="font-size:30px;float:left;padding-right:10px;color:#ffcc00;">⚠</div>
+%% <i>Passing functions as arguments might not be compatible across different Erlang versions,
+%% so if your cluster is composed of nodes running different Erlang versions do not use this method.</i>
+%%
 %% <h2>Examples</h2>
 %% <h3>Elixir</h3>
 %% ```

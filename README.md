@@ -145,6 +145,26 @@ ok
 ```
 
 ## Configuration Options
+
+### release_cursor_count
+Specifies after how many logs `ram` should create a `ra` snapshot. Defaults to `1000`.
+
+#### Elixir
+  
+```elixir
+config :ram,
+  release_cursor_count: 1000
+```
+
+#### Erlang
+
+```erlang
+{ram, [
+  {release_cursor_count, 1000}
+]}
+```
+
+### Other settings
 Since Ram uses [Ra](https://github.com/rabbitmq/ra), please refer to Ra's
 [documentation](https://github.com/rabbitmq/ra#configuration-reference) on available options.
 
