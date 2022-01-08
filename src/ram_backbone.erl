@@ -28,8 +28,9 @@
 
 %% API
 -export([start_cluster/1, stop_cluster/1]).
--export([add_node/2, remove_node/2, nodes/0]).
--export([get_server_loc/0]).
+-export([add_node/1, remove_node/1, nodes/0]).
+-export([lookup_leader/0]).
+-export([process_command/1, process_query/1]).
 
 %% tests
 -ifdef(TEST).
@@ -39,7 +40,7 @@
 %% macros
 -define(SYSTEM, default).
 -define(CLUSTER_NAME, ram).
--define(RA_MACHINE,  {module, ram_kv, #{}}).
+-define(RA_MACHINE, {module, ram_kv, #{}}).
 
 %% ===================================================================
 %% API
@@ -83,66 +84,78 @@ stop_cluster(Nodes) ->
             {error, Reason}
     end.
 
--spec add_node(Node :: node(), RefNode :: node()) -> ok | {error, Reason :: term()}.
-add_node(Node, RefNode) ->
-    %% init
-    ServerLoc = make_server_id(RefNode),
-    ServerId = make_server_id(Node),
+-spec add_node(Node :: node()) -> ok | {error, Reason :: term()}.
+add_node(Node) ->
     %% start ra
     ok = rpc:call(Node, ra, start, []),
-    %% add
-    case ra:add_member(ServerLoc, ServerId) of
-        {ok, _, _NewServerLoc} ->
-            case ra:start_server(?SYSTEM, ?CLUSTER_NAME, ServerId, ?RA_MACHINE, [ServerLoc]) of
-                ok ->
-                    error_logger:info_msg("RAM[~s] Node ~s added to cluster", [node(), Node]),
-                    ok;
+    %% get members
+    case catch members() of
+        {'EXIT', {{failed_to_get_members, _} = Reason, _}} ->
+            {error, Reason};
 
-                {error, Reason} ->
-                    error_logger:error_msg("RAM[~s] Error addding node ~s to cluster: ~p", [node(), Node, Reason]),
-                    {error, Reason}
-            end;
+        [] ->
+            {error, failed_to_get_members};
 
-        {error, Reason} ->
-            error_logger:error_msg("RAM[~s] Error addding node ~s to cluster: ~p", [node(), Node, Reason]),
-            {error, Reason}
+        ServerIds ->
+            ServerId = make_server_id(Node),
+            case lists:member(ServerId, ServerIds) of
+                false -> start_server_and_add(ServerId, ServerIds);
+                true -> ok
+            end
     end.
 
--spec remove_node(Node :: node(), RefNode :: node()) -> ok | {error, Reason :: term()}.
-remove_node(Node, RefNode) ->
-    %% init
-    ServerLoc = make_server_id(RefNode),
-    ServerId = make_server_id(Node),
-    %% remove
-    case ra:leave_and_delete_server(?SYSTEM, ServerLoc, ServerId) of
-        ok ->
-            error_logger:info_msg("RAM[~s] Node ~s removed from cluster", [node(), Node]),
-            ok;
+-spec remove_node(Node :: node()) -> ok | {error, Reason :: term()}.
+remove_node(Node) ->
+    %% get members
+    case catch members() of
+        {'EXIT', {{failed_to_get_members, _} = Reason, _}} ->
+            {error, Reason};
 
-        timeout ->
-            error_logger:error_msg("RAM[~s] Timeout removing node ~s from cluster", [node(), Node]),
-            {error, timeout};
+        [] ->
+            {error, failed_to_get_members};
 
-        Err ->
-            error_logger:error_msg("RAM[~s] Error removing node ~s from cluster: ~p", [node(), Node, Err]),
-            {error, Err}
+        ServerIds ->
+            ServerId = make_server_id(Node),
+            remove_and_stop_server(ServerId, ServerIds)
     end.
 
 -spec nodes() -> [node()].
 nodes() ->
-    ServerId = make_server_id(node()),
-    case ra:members(ServerId) of
-        {ok, ServerIds, _} ->
-            get_nodes_from_server_ids(ServerIds);
+    get_nodes_from_server_ids(members()).
 
-        {error, Reason} ->
-            error_logger:error_msg("RAM[~s] Failed to retrieve members: ~p", [node(), Reason]),
-            {error, Reason}
+-spec lookup_leader() -> ra:server_id() | undefined.
+lookup_leader() ->
+    ra_leaderboard:lookup_leader(?CLUSTER_NAME).
+
+-spec process_command(ram_kv:ram_kv_command()) -> Ret :: term() | {error, Reason :: term()}.
+process_command(Command) ->
+    case lookup_leader() of
+        undefined ->
+            error_logger:error_msg("RAM[~s] Failed to lookup leader", [node()]),
+            {error, could_not_lookup_leader};
+
+        LeaderId ->
+            case ra:process_command(LeaderId, Command) of
+                {ok, Ret, _LeaderId} -> Ret;
+                {timeout, _} = Timeout -> {error, Timeout};
+                {error, _} = Error -> Error
+            end
     end.
 
--spec get_server_loc() -> ra:server_id().
-get_server_loc() ->
-    make_server_id(node()).
+-spec process_query(QueryFun :: function()) -> Ret :: term() | {error, Reason :: term()}.
+process_query(QueryFun) ->
+    case lookup_leader() of
+        undefined ->
+            error_logger:error_msg("RAM[~s] Failed to lookup leader", [node()]),
+            {error, could_not_lookup_leader};
+
+        LeaderId ->
+            case ra:consistent_query(LeaderId, QueryFun) of
+                {ok, Ret, _} -> Ret;
+                {timeout, _} = Timeout -> {error, Timeout};
+                {error, _} = Error -> Error
+            end
+    end.
 
 %% ===================================================================
 %% Internals
@@ -158,3 +171,50 @@ get_node_from_server_id({ram, Node}) ->
 -spec get_nodes_from_server_ids([ra:server_id()]) -> [node()].
 get_nodes_from_server_ids(ServerIds) ->
     [get_node_from_server_id(ServerId) || ServerId <- ServerIds].
+
+-spec members() -> [ra:server_id()].
+members() ->
+    ServerId = make_server_id(node()),
+    case ra:members(ServerId) of
+        {ok, ServerIds, _} ->
+            ServerIds;
+
+        {error, Reason} ->
+            error_logger:error_msg("RAM[~s] Failed to retrieve members: ~p", [node(), Reason]),
+            error({failed_to_get_members, Reason})
+    end.
+
+-spec start_server_and_add(ra:server_id(), [ra:server_id()]) -> ok | {error, Reason :: term()}.
+start_server_and_add(ServerId, ServerIds) ->
+    case ra:start_server(?SYSTEM, ?CLUSTER_NAME, ServerId, ?RA_MACHINE, ServerIds) of
+        ok ->
+            case ra:add_member(ServerIds, ServerId) of
+                {ok, _, _} ->
+                    error_logger:info_msg("RAM[~s] Node ~s added to cluster", [node(), get_node_from_server_id(ServerId)]),
+                    ok;
+
+                {error, Reason} ->
+                    error_logger:error_msg("RAM[~s] Error adding node ~s to cluster: ~p", [node(), get_node_from_server_id(ServerId), Reason]),
+                    {error, Reason}
+            end;
+
+        {error, Reason} ->
+            error_logger:error_msg("RAM[~s] Error starting node ~s: ~p", [node(), get_node_from_server_id(ServerId), Reason]),
+            {error, Reason}
+    end.
+
+-spec remove_and_stop_server(ra:server_id(), [ra:server_id()]) -> ok | {error, Reason :: term()}.
+remove_and_stop_server(ServerId, ServerIds) ->
+    case ra:leave_and_delete_server(?SYSTEM, ServerIds, ServerId) of
+        ok ->
+            error_logger:info_msg("RAM[~s] Node ~s removed from cluster", [node(), get_node_from_server_id(ServerId)]),
+            ok;
+
+        timeout ->
+            error_logger:error_msg("RAM[~s] Timeout removing node ~s from cluster", [node(), get_node_from_server_id(ServerId)]),
+            {error, timeout};
+
+        {error, _} = Err ->
+            error_logger:error_msg("RAM[~s] Error removing node ~s from cluster: ~p", [node(), get_node_from_server_id(ServerId), Err]),
+            Err
+    end.

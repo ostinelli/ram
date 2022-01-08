@@ -54,41 +54,30 @@ get(Key, Default) ->
 
 -spec fetch(Key :: term()) -> {ok, Value :: term()} | error.
 fetch(Key) ->
-    ServerLoc = ram_backbone:get_server_loc(),
-    case ra:consistent_query(ServerLoc,
-        fun(State) ->
-            maps:find(Key, State)
-        end) of
-        {ok, {ok, Value}, _} -> {ok, Value};
-        {ok, error, _} -> error;
-        {error, Reason} -> error({ram, Reason});
-        {timeout, ServerId} -> error({ram, {timeout, ServerId}})
+    case ram_backbone:process_query(fun(State) -> maps:find(Key, State) end) of
+        {error, Reason} -> error(Reason);
+        Ret -> Ret
     end.
 
 -spec put(Key :: term(), Value :: term()) -> ok.
 put(Key, Value) ->
-    process_command({put, Key, Value}).
+    case ram_backbone:process_command({put, Key, Value}) of
+        {error, Reason} -> error(Reason);
+        Ret -> Ret
+    end.
 
 -spec update(Key :: term(), Default :: term(), function()) -> ok.
 update(Key, Default, Fun) ->
-    process_command({update, Key, Default, Fun}).
+    case ram_backbone:process_command({update, Key, Default, Fun}) of
+        {error, Reason} -> error(Reason);
+        Ret -> Ret
+    end.
 
 -spec delete(Key :: term()) -> ok.
 delete(Key) ->
-    process_command({delete, Key}).
-
--spec process_command(ram_kv_command()) -> Reply :: term().
-process_command(Command) ->
-    ServerLoc = ram_backbone:get_server_loc(),
-    case ra:process_command(ServerLoc, Command) of
-        {ok, Reply, _NewServerLoc} ->
-            Reply;
-
-        {error, Reason} ->
-            error({ram, Reason});
-
-        {timeout, ServerLoc} ->
-            error({ram, {timeout, ServerLoc}})
+    case ram_backbone:process_command({delete, Key}) of
+        {error, Reason} -> error(Reason);
+        Ret -> Ret
     end.
 
 %% ===================================================================

@@ -275,25 +275,36 @@ four_nodes_cluster_changes(Config) ->
     "value-2" = rpc:call(SlaveNode2, ram, get, ["key-2"]),
 
     %% add node
-    ok = ram:start(),
-    ok = ram:add_node(SlaveNode3, SlaveNode1),
+    ok = rpc:call(SlaveNode1, ram, add_node, [SlaveNode3]),
 
     %% retrieve
     "value-1" = rpc:call(SlaveNode1, ram, get, ["key-1"]),
     "value-2" = rpc:call(SlaveNode1, ram, get, ["key-2"]),
-    "value-1" = rpc:call(SlaveNode2, ram, get, ["key-1"]),
+    ram_test_suite_helper:assert_wait(
+        "value-1",
+        fun() -> rpc:call(SlaveNode2, ram, get, ["key-1"]) end
+    ),
     "value-2" = rpc:call(SlaveNode2, ram, get, ["key-2"]),
-    "value-1" = rpc:call(SlaveNode3, ram, get, ["key-1"]),
+    ram_test_suite_helper:assert_wait(
+        "value-1",
+        fun() -> rpc:call(SlaveNode3, ram, get, ["key-1"]) end
+    ),
     "value-2" = rpc:call(SlaveNode3, ram, get, ["key-2"]),
 
     %% remove node
-    ok = ram:remove_node(SlaveNode1, SlaveNode2),
+    ok = rpc:call(SlaveNode2, ram, remove_node, [SlaveNode1]),
 
     %% retrieve
-    {badrpc, {'EXIT', {{ram, noproc}, _}}} = (catch rpc:call(SlaveNode1, ram, get, ["key-1"])),
-    "value-1" = rpc:call(SlaveNode2, ram, get, ["key-1"]),
+    {badrpc, {'EXIT', {noproc, _}}} = (catch rpc:call(SlaveNode1, ram, get, ["key-1"])),
+    ram_test_suite_helper:assert_wait(
+        "value-1",
+        fun() -> rpc:call(SlaveNode2, ram, get, ["key-1"]) end
+    ),
     "value-2" = rpc:call(SlaveNode2, ram, get, ["key-2"]),
-    "value-1" = rpc:call(SlaveNode3, ram, get, ["key-1"]),
+    ram_test_suite_helper:assert_wait(
+        "value-1",
+        fun() -> rpc:call(SlaveNode3, ram, get, ["key-1"]) end
+    ),
     "value-2" = rpc:call(SlaveNode3, ram, get, ["key-2"]),
 
     ExpectedNodes = lists:sort([SlaveNode2, SlaveNode3]),
@@ -322,7 +333,7 @@ four_nodes_cluster_net_splits(Config) ->
     "value" = rpc:call(SlaveNode2, ram, get, ["key"]),
     "value" = rpc:call(SlaveNode3, ram, get, ["key"]),
 
-    LeaderId = rpc:call(SlaveNode1, ram_backbone, get_server_loc, []),
+    LeaderId = rpc:call(SlaveNode1, ram_backbone, lookup_leader, []),
     LeaderNode = ram_backbone:get_node_from_server_id(LeaderId),
     FollowerNodes = [SlaveNode1, SlaveNode2, SlaveNode3] -- [LeaderNode],
     [FollowerNode_A, FollowerNode_B] = FollowerNodes,
@@ -333,7 +344,7 @@ four_nodes_cluster_net_splits(Config) ->
     end, FollowerNodes),
 
     %% retrieve
-    {badrpc, {'EXIT', {{ram, {timeout, LeaderId}}, _}}} = (catch rpc:call(LeaderNode, ram, get, ["key"])),
+    {badrpc, {'EXIT', {{timeout, LeaderId}, _}}} = (catch rpc:call(LeaderNode, ram, get, ["key"])),
     "value" = rpc:call(FollowerNode_A, ram, get, ["key"]),
     "value" = rpc:call(FollowerNode_B, ram, get, ["key"]),
 

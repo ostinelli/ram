@@ -33,7 +33,7 @@
 %% API
 -export([start/0, stop/0]).
 -export([start_cluster/1, stop_cluster/1]).
--export([add_node/2, remove_node/2, nodes/0]).
+-export([add_node/1, remove_node/1, nodes/0]).
 -export([get/1, get/2, fetch/1]).
 -export([put/2]).
 -export([update/3]).
@@ -67,19 +67,14 @@ stop_cluster(Nodes) ->
     ram_backbone:stop_cluster(Nodes).
 
 %% @doc Adds Node to an existing Ram cluster.
-%%
-%% RefNode is any of the nodes that are already part of the cluster.
--spec add_node(Node :: node(), RefNode :: node()) -> ok | {error, Reason :: term()}.
-add_node(Node, RefNode) ->
-    ram_backbone:add_node(Node, RefNode).
+-spec add_node(Node :: node()) -> ok | {error, Reason :: term()}.
+add_node(Node) ->
+    ram_backbone:add_node(Node).
 
 %% @doc Removes Node from the Ram cluster.
-%%
-%% RefNode is any of the other nodes that are part of the cluster.
-%%Use this to decommission a node that's unable to start or is permanently lost.
--spec remove_node(Node :: node(), RefNode :: node()) -> ok | {error, Reason :: term()}.
-remove_node(Node, RefNode) ->
-    ram_backbone:remove_node(Node, RefNode).
+-spec remove_node(Node :: node()) -> ok | {error, Reason :: term()}.
+remove_node(Node) ->
+    ram_backbone:remove_node(Node).
 
 %% @doc Returns the nodes in the Ram cluster.
 -spec nodes() -> [node()].
