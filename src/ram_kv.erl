@@ -119,7 +119,7 @@ apply(#{index := Index} =_Meta, {delete, Key}, State) ->
 %% ===================================================================
 %% Internals
 %% ===================================================================
--spec side_effects(ra:index(), map()) -> [ra_machine:effects()].
+-spec side_effects(ra:index(), map()) -> ra_machine:effects().
 side_effects(Index, State) ->
     ApplyResetCount = application:get_env(ram, release_cursor_count, 1000),
     case Index rem ApplyResetCount of
