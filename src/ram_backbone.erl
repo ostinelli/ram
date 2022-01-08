@@ -131,30 +131,36 @@ lookup_leader() ->
 process_command(Command) ->
     case lookup_leader() of
         undefined ->
-            error_logger:error_msg("RAM[~s] Failed to lookup leader", [node()]),
-            {error, could_not_lookup_leader};
+            ServerId = make_server_id(node()),
+            process_command(ServerId, Command);
 
         LeaderId ->
-            case ra:process_command(LeaderId, Command) of
-                {ok, Ret, _LeaderId} -> Ret;
-                {timeout, _} = Timeout -> {error, Timeout};
-                {error, _} = Error -> Error
-            end
+            process_command(LeaderId, Command)
+    end.
+-spec process_command(ra:server_id(), ram_kv:ram_kv_command()) -> Ret :: term() | {error, Reason :: term()}.
+process_command(ServerId, Command) ->
+    case ra:process_command(ServerId, Command) of
+        {ok, Ret, _LeaderId} -> Ret;
+        {timeout, _} = Timeout -> {error, Timeout};
+        {error, _} = Error -> Error
     end.
 
 -spec process_query(QueryFun :: function()) -> Ret :: term() | {error, Reason :: term()}.
 process_query(QueryFun) ->
     case lookup_leader() of
         undefined ->
-            error_logger:error_msg("RAM[~s] Failed to lookup leader", [node()]),
-            {error, could_not_lookup_leader};
+            ServerId = make_server_id(node()),
+            process_query(ServerId, QueryFun);
 
         LeaderId ->
-            case ra:consistent_query(LeaderId, QueryFun) of
-                {ok, Ret, _} -> Ret;
-                {timeout, _} = Timeout -> {error, Timeout};
-                {error, _} = Error -> Error
-            end
+            process_query(LeaderId, QueryFun)
+    end.
+-spec process_query(ra:server_id(), QueryFun :: function()) -> Ret :: term() | {error, Reason :: term()}.
+process_query(ServerId, QueryFun) ->
+    case ra:consistent_query(ServerId, QueryFun) of
+        {ok, Ret, _} -> Ret;
+        {timeout, _} = Timeout -> {error, Timeout};
+        {error, _} = Error -> Error
     end.
 
 %% ===================================================================
@@ -206,7 +212,7 @@ start_server_and_add(ServerId, ServerIds) ->
 start_server(ServerId, ServerIds) ->
     case ra:start_server(?SYSTEM, ?CLUSTER_NAME, ServerId, ?RA_MACHINE, ServerIds) of
         ok ->
-            error_logger:info_msg("RAM[~s] Started server", [node(), get_node_from_server_id(ServerId)]),
+            error_logger:info_msg("RAM[~s] Started server", [node()]),
             ok;
 
         {error, Reason} ->
