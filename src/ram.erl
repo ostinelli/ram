@@ -67,6 +67,12 @@ stop_cluster(Nodes) ->
     ram_backbone:stop_cluster(Nodes).
 
 %% @doc Adds Node to an existing Ram cluster.
+%%
+%% This method is to be called when:
+%% <ul>
+%% <li>Adding a new node to the cluster.</li>
+%% <li>Restarting a previously stopped node of the cluster, so that it joins the cluster again.</li>
+%% </ul>
 -spec add_node(Node :: node()) -> ok | {error, Reason :: term()}.
 add_node(Node) ->
     ram_backbone:add_node(Node).

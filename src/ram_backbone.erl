@@ -100,7 +100,7 @@ add_node(Node) ->
             ServerId = make_server_id(Node),
             case lists:member(ServerId, ServerIds) of
                 false -> start_server_and_add(ServerId, ServerIds);
-                true -> ok
+                true -> start_server(ServerId, ServerIds)
             end
     end.
 
@@ -186,7 +186,7 @@ members() ->
 
 -spec start_server_and_add(ra:server_id(), [ra:server_id()]) -> ok | {error, Reason :: term()}.
 start_server_and_add(ServerId, ServerIds) ->
-    case ra:start_server(?SYSTEM, ?CLUSTER_NAME, ServerId, ?RA_MACHINE, ServerIds) of
+    case start_server(ServerId, ServerIds) of
         ok ->
             case ra:add_member(ServerIds, ServerId) of
                 {ok, _, _} ->
@@ -199,7 +199,18 @@ start_server_and_add(ServerId, ServerIds) ->
             end;
 
         {error, Reason} ->
-            error_logger:error_msg("RAM[~s] Error starting node ~s: ~p", [node(), get_node_from_server_id(ServerId), Reason]),
+            {error, Reason}
+    end.
+
+-spec start_server(ra:server_id(), [ra:server_id()]) -> ok | {error, Reason :: term()}.
+start_server(ServerId, ServerIds) ->
+    case ra:start_server(?SYSTEM, ?CLUSTER_NAME, ServerId, ?RA_MACHINE, ServerIds) of
+        ok ->
+            error_logger:info_msg("RAM[~s] Started server", [node(), get_node_from_server_id(ServerId)]),
+            ok;
+
+        {error, Reason} ->
+            error_logger:error_msg("RAM[~s] Error starting server ~s: ~p", [node(), get_node_from_server_id(ServerId), Reason]),
             {error, Reason}
     end.
 

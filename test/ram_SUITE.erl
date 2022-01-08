@@ -40,6 +40,7 @@
 ]).
 -export([
     four_nodes_cluster_changes/1,
+    four_nodes_cluster_stop_restart_nodes/1,
     four_nodes_cluster_net_splits/1
 ]).
 
@@ -86,6 +87,7 @@ groups() ->
         ]},
         {four_nodes, [shuffle], [
             four_nodes_cluster_changes,
+            four_nodes_cluster_stop_restart_nodes,
             four_nodes_cluster_net_splits
         ]}
     ].
@@ -310,6 +312,51 @@ four_nodes_cluster_changes(Config) ->
     ExpectedNodes = lists:sort([SlaveNode2, SlaveNode3]),
     ExpectedNodes = lists:sort(rpc:call(SlaveNode2, ram, nodes, [])),
     ExpectedNodes = lists:sort(rpc:call(SlaveNode3, ram, nodes, [])).
+
+four_nodes_cluster_stop_restart_nodes(Config) ->
+    %% get slaves
+    SlaveNode1 = proplists:get_value(ram_slave_1, Config),
+    SlaveNode2 = proplists:get_value(ram_slave_2, Config),
+    SlaveNode3 = proplists:get_value(ram_slave_3, Config),
+
+    %% start ram
+    ok = rpc:call(SlaveNode1, ram, start, []),
+    ok = rpc:call(SlaveNode2, ram, start, []),
+    ok = rpc:call(SlaveNode3, ram, start, []),
+
+    %% create cluster
+    ok = ram:start_cluster([SlaveNode1, SlaveNode2, SlaveNode3]),
+
+    %% put
+    ok = rpc:call(SlaveNode1, ram, put, ["key", "value"]),
+
+    %% stop node 1
+    ram_test_suite_helper:stop_slave(ram_slave_1),
+
+    %% retrieve
+    "value" = rpc:call(SlaveNode2, ram, get, ["key"]),
+    "value" = rpc:call(SlaveNode3, ram, get, ["key"]),
+
+    %% start node 1
+    {ok, SlaveNode1_New} = ram_test_suite_helper:start_slave(ram_slave_1),
+    lists:foreach(fun(N) ->
+        rpc:call(SlaveNode1_New, ram_test_suite_helper, connect_node, [N])
+    end, [node(), SlaveNode2, SlaveNode3]),
+    ram_test_suite_helper:assert_cluster(node(), [SlaveNode1_New, SlaveNode2, SlaveNode3]),
+
+    %% add node
+    ok = rpc:call(SlaveNode3, ram, add_node, [SlaveNode1_New]),
+
+    %% retrieve
+    ram_test_suite_helper:assert_wait(
+        "value",
+        fun() -> rpc:call(SlaveNode1_New, ram, get, ["key"]) end
+    ),
+    "value" = rpc:call(SlaveNode2, ram, get, ["key"]),
+    "value" = rpc:call(SlaveNode3, ram, get, ["key"]),
+
+    %% stop cluster
+    ok = ram:stop_cluster([SlaveNode1_New, SlaveNode2, SlaveNode3]).
 
 four_nodes_cluster_net_splits(Config) ->
     %% get slaves
