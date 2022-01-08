@@ -23,14 +23,14 @@ If you're using [rebar3](https://github.com/erlang/rebar3), add `ram` as a depen
 
 ```erlang
 {deps, [
-  {ram, {git, "git://github.com/ostinelli/ram.git", {tag, "0.4.0"}}}
+  {ram, {git, "git://github.com/ostinelli/ram.git", {tag, "0.4.1"}}}
 ]}.
 ```
 Or, if you're using [Hex.pm](https://hex.pm/) as package manager (with the [rebar3_hex](https://github.com/hexpm/rebar3_hex) plugin):
 
 ```erlang
 {deps, [
-  {ram, "0.4.0"}
+  {ram, "0.4.1"}
 ]}.
 ```
 
