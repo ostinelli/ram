@@ -1,6 +1,6 @@
 {application, ram,
     [
-        {description, "An in-memory distributed KV store for Erlang and Elixir."},
+        {description, "A distributed KV store for Erlang and Elixir."},
         {vsn, "0.3.0"},
         {registered, [
             ram_sup

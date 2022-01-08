@@ -1,7 +1,7 @@
 ![CI](https://github.com/ostinelli/ram/actions/workflows/ci.yml/badge.svg) [![Hex pm](https://img.shields.io/hexpm/v/ram.svg)](https://hex.pm/packages/ram)
 
 # Ram
-**Ram** is an in-memory distributed KV store for Erlang and Elixir.
+**Ram** is a distributed KV store for Erlang and Elixir.
 It chooses Consistency over Availability by using the [Raft Consensus Algorithm](https://raft.github.io/),
 and is based on Rabbit MQ's implementation [Ra](https://github.com/rabbitmq/ra).
 
@@ -31,22 +31,6 @@ Or, if you're using [Hex.pm](https://hex.pm/) as package manager (with the [reba
 ```erlang
 {deps, [
   {ram, "0.3.0"}
-]}.
-```
-
-Ensure that `ram` is started with your application, for example by adding it in your `.app` file to the list of `applications`:
-
-```erlang
-{application, my_app, [
-    %% ...
-    {applications, [
-        kernel,
-        stdlib,
-        sasl,
-        ram,
-        %% ...
-    ]},
-    %% ...
 ]}.
 ```
 

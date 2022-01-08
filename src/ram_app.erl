@@ -1,5 +1,5 @@
 %% ==========================================================================================================
-%% Ram - An in-memory distributed KV store for Erlang and Elixir.
+%% Ram - A distributed KV store for Erlang and Elixir.
 %%
 %% The MIT License (MIT)
 %%
