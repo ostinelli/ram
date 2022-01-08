@@ -171,8 +171,7 @@ end_per_testcase(_, _Config) ->
 %% Tests
 %% ===================================================================
 one_node_operations(_Config) ->
-    %% start ram
-    ok = ram:start(),
+    %% start cluster
     ok = ram:start_cluster([node()]),
 
     %% check
@@ -194,12 +193,7 @@ three_nodes_operations(Config) ->
     SlaveNode1 = proplists:get_value(ram_slave_1, Config),
     SlaveNode2 = proplists:get_value(ram_slave_2, Config),
 
-    %% start ram
-    ok = ram:start(),
-    ok = rpc:call(SlaveNode1, ram, start, []),
-    ok = rpc:call(SlaveNode2, ram, start, []),
-
-    %% create cluster
+    %% start cluster
     ok = ram:start_cluster([node(), SlaveNode1, SlaveNode2]),
 
     %% check
@@ -258,12 +252,7 @@ four_nodes_cluster_changes(Config) ->
     SlaveNode2 = proplists:get_value(ram_slave_2, Config),
     SlaveNode3 = proplists:get_value(ram_slave_3, Config),
 
-    %% start ram
-    ok = rpc:call(SlaveNode1, ram, start, []),
-    ok = rpc:call(SlaveNode2, ram, start, []),
-    ok = rpc:call(SlaveNode3, ram, start, []),
-
-    %% create cluster
+    %% start cluster
     ok = ram:start_cluster([SlaveNode1, SlaveNode2]),
 
     %% put
@@ -319,12 +308,7 @@ four_nodes_cluster_stop_restart_nodes(Config) ->
     SlaveNode2 = proplists:get_value(ram_slave_2, Config),
     SlaveNode3 = proplists:get_value(ram_slave_3, Config),
 
-    %% start ram
-    ok = rpc:call(SlaveNode1, ram, start, []),
-    ok = rpc:call(SlaveNode2, ram, start, []),
-    ok = rpc:call(SlaveNode3, ram, start, []),
-
-    %% create cluster
+    %% start cluster
     ok = ram:start_cluster([SlaveNode1, SlaveNode2, SlaveNode3]),
 
     %% put
@@ -337,7 +321,7 @@ four_nodes_cluster_stop_restart_nodes(Config) ->
     "value" = rpc:call(SlaveNode2, ram, get, ["key"]),
     "value" = rpc:call(SlaveNode3, ram, get, ["key"]),
 
-    %% start node 1
+    %% start node 1 & reconnect
     {ok, SlaveNode1_New} = ram_test_suite_helper:start_slave(ram_slave_1),
     lists:foreach(fun(N) ->
         rpc:call(SlaveNode1_New, ram_test_suite_helper, connect_node, [N])
@@ -364,12 +348,7 @@ four_nodes_cluster_net_splits(Config) ->
     SlaveNode2 = proplists:get_value(ram_slave_2, Config),
     SlaveNode3 = proplists:get_value(ram_slave_3, Config),
 
-    %% start ram
-    ok = rpc:call(SlaveNode1, ram, start, []),
-    ok = rpc:call(SlaveNode2, ram, start, []),
-    ok = rpc:call(SlaveNode3, ram, start, []),
-
-    %% create cluster
+    %% start cluster
     ok = ram:start_cluster([SlaveNode1, SlaveNode2, SlaveNode3]),
 
     %% put
