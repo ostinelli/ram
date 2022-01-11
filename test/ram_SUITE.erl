@@ -267,7 +267,7 @@ four_nodes_cluster_changes(Config) ->
     "value-1" = rpc:call(SlaveNode2, ram, get, ["key-1"]),
     "value-2" = rpc:call(SlaveNode2, ram, get, ["key-2"]),
 
-    %% add node
+    %% add node 3
     ok = rpc:call(SlaveNode1, ram, add_node, [SlaveNode3]),
 
     %% retrieve
@@ -284,7 +284,7 @@ four_nodes_cluster_changes(Config) ->
     ),
     "value-2" = rpc:call(SlaveNode3, ram, get, ["key-2"]),
 
-    %% remove node
+    %% remove node 1
     ok = rpc:call(SlaveNode2, ram, remove_node, [SlaveNode1]),
 
     %% retrieve
@@ -302,7 +302,10 @@ four_nodes_cluster_changes(Config) ->
 
     ExpectedNodes = lists:sort([SlaveNode2, SlaveNode3]),
     ExpectedNodes = lists:sort(rpc:call(SlaveNode2, ram, nodes, [])),
-    ExpectedNodes = lists:sort(rpc:call(SlaveNode3, ram, nodes, [])).
+    ExpectedNodes = lists:sort(rpc:call(SlaveNode3, ram, nodes, [])),
+
+    %% stop cluster
+    ok = ram:start_cluster([SlaveNode1, SlaveNode3]).
 
 four_nodes_cluster_stop_restart_nodes(Config) ->
     %% get slaves
@@ -376,7 +379,7 @@ four_nodes_cluster_restart(Config) ->
     ram_test_suite_helper:assert_wait(
         "value",
         fun() -> rpc:call(SlaveNode1, ram, get, ["key"]) end,
-        30000
+        120000
     ),
     "value" = rpc:call(SlaveNode2, ram, get, ["key"]),
     "value" = rpc:call(SlaveNode3, ram, get, ["key"]),
@@ -399,7 +402,7 @@ four_nodes_cluster_restart(Config) ->
     ram_test_suite_helper:assert_wait(
         "value",
         fun() -> rpc:call(SlaveNode1, ram, get, ["key"]) end,
-        30000
+        120000
     ),
     "value" = rpc:call(SlaveNode2, ram, get, ["key"]),
     "value" = rpc:call(SlaveNode3, ram, get, ["key"]),
@@ -428,7 +431,12 @@ four_nodes_cluster_net_splits(Config) ->
     ok = ram:start_cluster([SlaveNode1, SlaveNode2, SlaveNode3]),
 
     %% put
-    ok = rpc:call(SlaveNode1, ram, put, ["key", "value"]),
+
+    ram_test_suite_helper:assert_wait(
+        ok,
+        fun() -> rpc:call(SlaveNode1, ram, put, ["key", "value"]) end,
+        120000
+    ),
 
     %% retrieve
     "value" = rpc:call(SlaveNode1, ram, get, ["key"]),
