@@ -363,11 +363,11 @@ four_nodes_cluster_restart(Config) ->
 
     %% restart cluster nodes
     case ram_test_suite_helper:init_cluster(4) of
-        {error_initializing_cluster, Other} -> ct:fail("Error rebooting cluster: ~p", [Other]);
+        {error_initializing_cluster, Other1} -> ct:fail("Error rebooting cluster: ~p", [Other1]);
         _ -> ok
     end,
 
-    %% re-start
+    %% re-start nodes
     ok = rpc:call(SlaveNode1, ram, restart_server, []),
     ok = rpc:call(SlaveNode2, ram, restart_server, []),
     ok = rpc:call(SlaveNode3, ram, restart_server, []),
@@ -376,6 +376,36 @@ four_nodes_cluster_restart(Config) ->
     "value" = rpc:call(SlaveNode1, ram, get, ["key"]),
     "value" = rpc:call(SlaveNode2, ram, get, ["key"]),
     "value" = rpc:call(SlaveNode3, ram, get, ["key"]),
+
+    %% stop nodes
+    ram_test_suite_helper:stop_slave(ram_slave_1),
+    ram_test_suite_helper:stop_slave(ram_slave_2),
+    ram_test_suite_helper:stop_slave(ram_slave_3),
+
+    %% restart cluster nodes
+    case ram_test_suite_helper:init_cluster(4) of
+        {error_initializing_cluster, Other2} -> ct:fail("Error rebooting cluster: ~p", [Other2]);
+        _ -> ok
+    end,
+
+    %% re-start cluster
+    ok = ram:start_cluster([SlaveNode1, SlaveNode2, SlaveNode3]),
+
+    %% retrieve
+    "value" = rpc:call(SlaveNode1, ram, get, ["key"]),
+    "value" = rpc:call(SlaveNode2, ram, get, ["key"]),
+    "value" = rpc:call(SlaveNode3, ram, get, ["key"]),
+
+    %% stop cluster
+    ok = ram:stop_cluster([SlaveNode1, SlaveNode2, SlaveNode3]),
+
+    %% re-start cluster
+    ok = ram:start_cluster([SlaveNode1, SlaveNode2, SlaveNode3]),
+
+    %% retrieve
+    undefined = rpc:call(SlaveNode1, ram, get, ["key"]),
+    undefined = rpc:call(SlaveNode2, ram, get, ["key"]),
+    undefined = rpc:call(SlaveNode3, ram, get, ["key"]),
 
     %% stop cluster
     ok = ram:stop_cluster([SlaveNode1, SlaveNode2, SlaveNode3]).

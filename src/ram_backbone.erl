@@ -55,7 +55,7 @@ start_cluster(Nodes) ->
         ok = rpc:call(Node, ra, start, [])
     end, Nodes),
     %% start cluster
-    case ra:start_cluster(?SYSTEM, ?CLUSTER_NAME, ?RA_MACHINE, ServerIds) of
+    case ra:start_or_restart_cluster(?SYSTEM, ?CLUSTER_NAME, ?RA_MACHINE, ServerIds) of
         {ok, StartedIds, _NotStartedIds} when length(StartedIds) =:= length(Nodes) ->
             error_logger:info_msg("RAM[~s] Cluster started on ~p", [node(), get_nodes_from_server_ids(ServerIds)]),
             ok;

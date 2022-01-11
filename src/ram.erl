@@ -58,11 +58,16 @@ stop() ->
     application:stop(ram).
 
 %% @doc Starts the Ram cluster.
+%%
+%% If the cluster nodes were shutdown, this will restart the cluster (the data is kept across restarts).
+%% If a cluster is specifically stopped with {@link stop_cluster/1}, then data is unrecoverable after a restart.
 -spec start_cluster([node()]) -> ok | {error, Reason :: term()}.
 start_cluster(Nodes) ->
     ram_backbone:start_cluster(Nodes).
 
 %% @doc Stops the Ram cluster.
+%%
+%% If a cluster is stopped, its data is lost even if {@link start_cluster/1} is called with the same nodes.
 -spec stop_cluster([node()]) -> ok | {error, Reason :: term()}.
 stop_cluster(Nodes) ->
     ram_backbone:stop_cluster(Nodes).
