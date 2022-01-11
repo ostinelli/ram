@@ -373,7 +373,11 @@ four_nodes_cluster_restart(Config) ->
     ok = rpc:call(SlaveNode3, ram, restart_server, []),
 
     %% retrieve
-    "value" = rpc:call(SlaveNode1, ram, get, ["key"]),
+    ram_test_suite_helper:assert_wait(
+        "value",
+        fun() -> rpc:call(SlaveNode1, ram, get, ["key"]) end,
+        30000
+    ),
     "value" = rpc:call(SlaveNode2, ram, get, ["key"]),
     "value" = rpc:call(SlaveNode3, ram, get, ["key"]),
 
@@ -392,7 +396,11 @@ four_nodes_cluster_restart(Config) ->
     ok = ram:start_cluster([SlaveNode1, SlaveNode2, SlaveNode3]),
 
     %% retrieve
-    "value" = rpc:call(SlaveNode1, ram, get, ["key"]),
+    ram_test_suite_helper:assert_wait(
+        "value",
+        fun() -> rpc:call(SlaveNode1, ram, get, ["key"]) end,
+        30000
+    ),
     "value" = rpc:call(SlaveNode2, ram, get, ["key"]),
     "value" = rpc:call(SlaveNode3, ram, get, ["key"]),
 

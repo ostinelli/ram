@@ -37,7 +37,7 @@
 -export([assert_cluster/2]).
 -export([assert_received_messages/1, assert_received_messages/2]).
 -export([assert_empty_queue/0]).
--export([assert_wait/2]).
+-export([assert_wait/2, assert_wait/3]).
 -export([send_error_logger_to_disk/0]).
 
 %% internal
@@ -222,7 +222,7 @@ assert_cluster(Node, ExpectedNodes, StartAt) ->
     end.
 
 assert_received_messages(Messages) ->
-    assert_received_messages(Messages, ?DEFAULT_WAIT_TIMEOUT ).
+    assert_received_messages(Messages, ?DEFAULT_WAIT_TIMEOUT).
 assert_received_messages(Messages, Timeout) ->
     assert_received_messages(Messages, [], Timeout).
 assert_received_messages([], UnexpectedMessages, Timeout) ->
@@ -238,7 +238,7 @@ assert_received_messages(Messages, UnexpectedMessages, Timeout) ->
                 false ->
                     assert_received_messages(Messages, [Message | UnexpectedMessages], Timeout)
             end
-    after Timeout->
+    after Timeout ->
         assert_received_messages_evaluate(Messages, UnexpectedMessages)
     end.
 
@@ -271,20 +271,22 @@ assert_empty_queue(UnexpectedMessages) ->
     end.
 
 assert_wait(ExpectedResult, Fun) ->
-    assert_wait(ExpectedResult, Fun, os:system_time(millisecond)).
-assert_wait(ExpectedResult, Fun, StartAt) ->
+    assert_wait(ExpectedResult, Fun, ?DEFAULT_WAIT_TIMEOUT).
+assert_wait(ExpectedResult, Fun, Timeout) ->
+    assert_wait(ExpectedResult, Fun, Timeout, os:system_time(millisecond)).
+assert_wait(ExpectedResult, Fun, Timeout, StartAt) ->
     case Fun() of
         ExpectedResult ->
             ok;
 
         Result ->
-            case os:system_time(millisecond) - StartAt > ?DEFAULT_WAIT_TIMEOUT of
+            case os:system_time(millisecond) - StartAt > Timeout of
                 true ->
                     ct:fail("~n\tExpected: ~p~n\tActual: ~p~n", [ExpectedResult, Result]);
 
                 false ->
                     timer:sleep(50),
-                    assert_wait(ExpectedResult, Fun, StartAt)
+                    assert_wait(ExpectedResult, Fun, Timeout, StartAt)
             end
     end.
 
