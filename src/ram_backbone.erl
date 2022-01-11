@@ -29,6 +29,7 @@
 %% API
 -export([start_cluster/1, stop_cluster/1]).
 -export([add_node/1, remove_node/1, nodes/0]).
+-export([restart_server/0]).
 -export([lookup_leader/0]).
 -export([process_command/1, process_query/1]).
 
@@ -84,6 +85,11 @@ stop_cluster(Nodes) ->
             {error, Reason}
     end.
 
+-spec restart_server() -> ok.
+restart_server() ->
+    ra:start(),
+    ra:restart_server(default, make_server_id(node())).
+
 -spec add_node(Node :: node()) -> ok | {error, Reason :: term()}.
 add_node(Node) ->
     %% start ra
@@ -100,7 +106,7 @@ add_node(Node) ->
             ServerId = make_server_id(Node),
             case lists:member(ServerId, ServerIds) of
                 false -> start_server_and_add(ServerId, ServerIds);
-                true -> start_server(ServerId, ServerIds)
+                true -> rpc:call(Node, ram_backbone, restart_server, [])
             end
     end.
 
@@ -192,8 +198,9 @@ members() ->
 
 -spec start_server_and_add(ra:server_id(), [ra:server_id()]) -> ok | {error, Reason :: term()}.
 start_server_and_add(ServerId, ServerIds) ->
-    case start_server(ServerId, ServerIds) of
+    case ra:start_server(?SYSTEM, ?CLUSTER_NAME, ServerId, ?RA_MACHINE, ServerIds) of
         ok ->
+            error_logger:info_msg("RAM[~s] Started server on node ~s", [node(), get_node_from_server_id(ServerId)]),
             case ra:add_member(ServerIds, ServerId) of
                 {ok, _, _} ->
                     error_logger:info_msg("RAM[~s] Node ~s added to cluster", [node(), get_node_from_server_id(ServerId)]),
@@ -203,17 +210,6 @@ start_server_and_add(ServerId, ServerIds) ->
                     error_logger:error_msg("RAM[~s] Error adding node ~s to cluster: ~p", [node(), get_node_from_server_id(ServerId), Reason]),
                     {error, Reason}
             end;
-
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
--spec start_server(ra:server_id(), [ra:server_id()]) -> ok | {error, Reason :: term()}.
-start_server(ServerId, ServerIds) ->
-    case ra:start_server(?SYSTEM, ?CLUSTER_NAME, ServerId, ?RA_MACHINE, ServerIds) of
-        ok ->
-            error_logger:info_msg("RAM[~s] Started server", [node()]),
-            ok;
 
         {error, Reason} ->
             error_logger:error_msg("RAM[~s] Error starting server ~s: ~p", [node(), get_node_from_server_id(ServerId), Reason]),

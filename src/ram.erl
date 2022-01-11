@@ -34,6 +34,7 @@
 -export([start/0, stop/0]).
 -export([start_cluster/1, stop_cluster/1]).
 -export([add_node/1, remove_node/1, nodes/0]).
+-export([restart_server/0]).
 -export([get/1, get/2, fetch/1]).
 -export([put/2]).
 -export([update/3]).
@@ -66,6 +67,11 @@ start_cluster(Nodes) ->
 stop_cluster(Nodes) ->
     ram_backbone:stop_cluster(Nodes).
 
+%% @doc Restart a previously stopped node of the cluster, so that it joins the cluster again.
+-spec restart_server() -> ok | {error, Reason :: term()}.
+restart_server() ->
+    ram_backbone:restart_server().
+
 %% @doc Adds Node to an existing Ram cluster.
 %%
 %% This method is to be called when:
@@ -73,6 +79,8 @@ stop_cluster(Nodes) ->
 %% <li>Adding a new node to the cluster.</li>
 %% <li>Restarting a previously stopped node of the cluster, so that it joins the cluster again.</li>
 %% </ul>
+%%
+%% Note that when restarting a server it might be preferable to use {@link restart_server/0} instead.
 -spec add_node(Node :: node()) -> ok | {error, Reason :: term()}.
 add_node(Node) ->
     ram_backbone:add_node(Node).

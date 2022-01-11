@@ -41,6 +41,7 @@
 -export([
     four_nodes_cluster_changes/1,
     four_nodes_cluster_stop_restart_nodes/1,
+    four_nodes_cluster_restart/1,
     four_nodes_cluster_net_splits/1
 ]).
 
@@ -88,6 +89,7 @@ groups() ->
         {four_nodes, [shuffle], [
             four_nodes_cluster_changes,
             four_nodes_cluster_stop_restart_nodes,
+            four_nodes_cluster_restart,
             four_nodes_cluster_net_splits
         ]}
     ].
@@ -322,25 +324,61 @@ four_nodes_cluster_stop_restart_nodes(Config) ->
     "value" = rpc:call(SlaveNode3, ram, get, ["key"]),
 
     %% start node 1 & reconnect
-    {ok, SlaveNode1_New} = ram_test_suite_helper:start_slave(ram_slave_1),
+    {ok, SlaveNode1} = ram_test_suite_helper:start_slave(ram_slave_1),
     lists:foreach(fun(N) ->
-        rpc:call(SlaveNode1_New, ram_test_suite_helper, connect_node, [N])
+        rpc:call(SlaveNode1, ram_test_suite_helper, connect_node, [N])
     end, [node(), SlaveNode2, SlaveNode3]),
-    ram_test_suite_helper:assert_cluster(node(), [SlaveNode1_New, SlaveNode2, SlaveNode3]),
+    ram_test_suite_helper:assert_cluster(node(), [SlaveNode1, SlaveNode2, SlaveNode3]),
 
     %% add node
-    ok = rpc:call(SlaveNode3, ram, add_node, [SlaveNode1_New]),
+    ok = rpc:call(SlaveNode3, ram, add_node, [SlaveNode1]),
 
     %% retrieve
     ram_test_suite_helper:assert_wait(
         "value",
-        fun() -> rpc:call(SlaveNode1_New, ram, get, ["key"]) end
+        fun() -> rpc:call(SlaveNode1, ram, get, ["key"]) end
     ),
     "value" = rpc:call(SlaveNode2, ram, get, ["key"]),
     "value" = rpc:call(SlaveNode3, ram, get, ["key"]),
 
     %% stop cluster
-    ok = ram:stop_cluster([SlaveNode1_New, SlaveNode2, SlaveNode3]).
+    ok = ram:stop_cluster([SlaveNode1, SlaveNode2, SlaveNode3]).
+
+four_nodes_cluster_restart(Config) ->
+    %% get slaves
+    SlaveNode1 = proplists:get_value(ram_slave_1, Config),
+    SlaveNode2 = proplists:get_value(ram_slave_2, Config),
+    SlaveNode3 = proplists:get_value(ram_slave_3, Config),
+
+    %% start cluster
+    ok = ram:start_cluster([SlaveNode1, SlaveNode2, SlaveNode3]),
+
+    %% put
+    ok = rpc:call(SlaveNode1, ram, put, ["key", "value"]),
+
+    %% stop nodes
+    ram_test_suite_helper:stop_slave(ram_slave_1),
+    ram_test_suite_helper:stop_slave(ram_slave_2),
+    ram_test_suite_helper:stop_slave(ram_slave_3),
+
+    %% restart cluster nodes
+    case ram_test_suite_helper:init_cluster(4) of
+        {error_initializing_cluster, Other} -> ct:fail("Error rebooting cluster: ~p", [Other]);
+        _ -> ok
+    end,
+
+    %% re-start
+    ok = rpc:call(SlaveNode1, ram, restart_server, []),
+    ok = rpc:call(SlaveNode2, ram, restart_server, []),
+    ok = rpc:call(SlaveNode3, ram, restart_server, []),
+
+    %% retrieve
+    "value" = rpc:call(SlaveNode1, ram, get, ["key"]),
+    "value" = rpc:call(SlaveNode2, ram, get, ["key"]),
+    "value" = rpc:call(SlaveNode3, ram, get, ["key"]),
+
+    %% stop cluster
+    ok = ram:stop_cluster([SlaveNode1, SlaveNode2, SlaveNode3]).
 
 four_nodes_cluster_net_splits(Config) ->
     %% get slaves
