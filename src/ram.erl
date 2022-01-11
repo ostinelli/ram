@@ -31,7 +31,6 @@
 -module(ram).
 
 %% API
--export([start/0, stop/0]).
 -export([start_cluster/1, stop_cluster/1]).
 -export([add_node/1, remove_node/1, nodes/0]).
 -export([restart_server/0]).
@@ -43,20 +42,6 @@
 %% ===================================================================
 %% API
 %% ===================================================================
-%% @doc Starts Ram manually.
-%%
-%% In most cases Ram will be started as one of your application's dependencies,
-%% however you may use this helper method to start it manually.
--spec start() -> ok.
-start() ->
-    {ok, _} = application:ensure_all_started(ram),
-    ok.
-
-%% @doc Stops Ram manually.
--spec stop() -> ok | {error, Reason :: term()}.
-stop() ->
-    application:stop(ram).
-
 %% @doc Starts the Ram cluster.
 %%
 %% If the cluster nodes were shutdown, this will restart the cluster (the data is kept across restarts).
