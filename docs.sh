@@ -6,7 +6,7 @@ set -e
 
 rebar3 compile
 rebar3 as docs edoc
-version=0.5.0
+version=0.6.0
 ex_doc "ram" $version "_build/default/lib/ram/ebin" \
   --source-ref ${version} \
   --config docs.config $@

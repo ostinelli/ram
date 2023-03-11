@@ -24,25 +24,26 @@
 %% THE SOFTWARE.
 %% ==========================================================================================================
 -module(ram_node).
--behaviour(gen_server).
+-behaviour(gen_statem).
 
 %% API
 -export([
   start_link/0
 ]).
 
-%% gen_server callbacks
+%% states
+-export([noop/3]).
+
+%% gen_statem callbacks
 -export([
+  callback_mode/0,
   init/1,
-  handle_call/3,
-  handle_cast/2,
-  handle_info/2,
-  terminate/2,
-  code_change/3
+  terminate/3,
+  code_change/4
 ]).
 
 %% records
--record(state, {}).
+-record(data, {}).
 
 %% ===================================================================
 %% API
@@ -50,65 +51,49 @@
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
   Options = [],
-  gen_server:start_link({local, ?MODULE}, ?MODULE, [], Options).
+  gen_statem:start_link({local, ?MODULE}, ?MODULE, [], Options).
 
 %% ===================================================================
 %% Callbacks
 %% ===================================================================
+-spec callback_mode() -> gen_statem:callback_mode_result().
+callback_mode() ->
+  [state_functions, state_enter].
 
 %% ----------------------------------------------------------------------------------------------------------
 %% Init
 %% ----------------------------------------------------------------------------------------------------------
 -spec init([]) ->
-  {ok, State :: #state{}} |
-  {ok, State :: #state{}, Timeout :: non_neg_integer()} |
+  {ok, State :: atom(), #data{}} |
+  {ok, State :: atom(), #data{}, Actions :: [gen_statem:action()] | gen_statem:action()} |
   ignore |
   {stop, Reason :: term()}.
 init([]) ->
   %% init
-  {ok, #state{}}.
+  {ok, noop, #data{}}.
 
 %% ----------------------------------------------------------------------------------------------------------
-%% Call messages
+%% noop state
 %% ----------------------------------------------------------------------------------------------------------
--spec handle_call(Request :: term(), From :: term(), State :: map()) ->
-  {reply, Reply :: term(), State :: map()} |
-  {reply, Reply :: term(), State :: map(), Timeout :: non_neg_integer()} |
-  {noreply, State :: map()} |
-  {noreply, State :: map(), Timeout :: non_neg_integer()} |
-  {stop, Reason :: term(), Reply :: term(), State :: map()} |
-  {stop, Reason :: term(), State :: map()}.
-handle_call(Request, From, State) ->
-  error_logger:warning_msg("RAM[~s] Received from ~p an unknown call message: ~p", [node(), From, Request]),
-  {reply, undefined, State}.
-
-%% ----------------------------------------------------------------------------------------------------------
-%% Cast messages
-%% ----------------------------------------------------------------------------------------------------------
--spec handle_cast(Msg :: term(), State :: map()) ->
-  {noreply, State :: map()} |
-  {noreply, State :: map(), Timeout :: non_neg_integer()} |
-  {stop, Reason :: term(), State :: map()}.
-handle_cast(Msg, State) ->
-  error_logger:warning_msg("RAM[~s] Received an unknown cast message: ~p", [node(), Msg]),
-  {noreply, State}.
-
-%% ----------------------------------------------------------------------------------------------------------
-%% All non Call / Cast messages
-%% ----------------------------------------------------------------------------------------------------------
--spec handle_info(Info :: term(), State :: map()) ->
-  {noreply, State :: map()} |
-  {noreply, State :: map(), Timeout :: non_neg_integer()} |
-  {stop, Reason :: term(), State :: map()}.
-handle_info(Info, State) ->
-  error_logger:warning_msg("RAM[~s] Received an unknown info message: ~p", [node(), Info]),
-  {noreply, State}.
+-spec noop(
+    enter | gen_statem:external_event_type() | gen_statem:timeout_event_type() | internal,
+    EventContent :: term(),
+    #data{}
+) ->
+  {next_state, State :: atom(), #data{}} |
+  {next_state, State :: atom(), #data{}, Actions :: [gen_statem:enter_action()] | gen_statem:enter_action()} |
+  gen_statem:state_callback_result(gen_statem:enter_action()).
+noop(enter, _OldState, Data) ->
+  {keep_state, Data};
+noop(EventType, EventContent, Data) ->
+  error_logger:warning_msg("RAM[~s] Received an unknown event ~p: ~p", [node(), EventType, EventContent]),
+  {keep_state, Data}.
 
 %% ----------------------------------------------------------------------------------------------------------
 %% Terminate
 %% ----------------------------------------------------------------------------------------------------------
--spec terminate(Reason :: term(), State :: map()) -> terminated.
-terminate(Reason, _State) ->
+-spec terminate(Reason :: term(), State :: atom(), #data{}) -> terminated.
+terminate(Reason, _State, _Data) ->
   error_logger:info_msg("RAM[~s] Terminating with reason: ~p", [node(), Reason]),
   %% return
   terminated.
@@ -116,6 +101,7 @@ terminate(Reason, _State) ->
 %% ----------------------------------------------------------------------------------------------------------
 %% Convert process state when code is changed.
 %% ----------------------------------------------------------------------------------------------------------
--spec code_change(OldVsn :: term(), State :: map(), Extra :: term()) -> {ok, State :: map()}.
-code_change(_OldVsn, State, _Extra) ->
-  {ok, State}.
+-spec code_change(OldVsn :: term(), OldState :: atom(), OldData :: #data{}, Extra :: term()) ->
+  {ok, NewState :: atom(), NewData :: #data{}}.
+code_change(_OldVsn, OldState, OldData, _Extra) ->
+  {ok, OldState, OldData}.
