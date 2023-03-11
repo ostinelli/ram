@@ -98,20 +98,17 @@ end_per_suite(_Config) ->
 %% Config0 = Config1 = [tuple()]
 %% Reason = any()
 %% -------------------------------------------------------------------
+%%init_per_group(three_nodes, Config) ->
+%%  do_init_per_group(3, Config);
 init_per_group(three_nodes, Config) ->
-  do_init_per_group(three_nodes, 3, Config);
+  NodesConfig = ram_test_suite_helper:init_cluster(3),
+  Config ++ NodesConfig;
 init_per_group(_GroupName, Config) ->
   Config.
 
-do_init_per_group(GroupName, Count, Config) ->
-  case ram_test_suite_helper:init_cluster(Count) of
-    {error_initializing_cluster, Other} ->
-      end_per_group(GroupName, Config),
-      {skip, Other};
-
-    NodesConfig ->
-      NodesConfig ++ Config
-  end.
+%%do_init_per_group(Count, Config) ->
+%%  NodesConfig = ram_test_suite_helper:init_cluster(Count),
+%%  Config ++ NodesConfig.
 
 %% -------------------------------------------------------------------
 %% Function: end_per_group(GroupName, Config0) ->
@@ -119,11 +116,9 @@ do_init_per_group(GroupName, Count, Config) ->
 %% GroupName = atom()
 %% Config0 = Config1 = [tuple()]
 %% -------------------------------------------------------------------
-end_per_group(three_nodes, Config) ->
-  ram_test_suite_helper:clean_after_test(),
-  ram_test_suite_helper:end_cluster(3, Config);
-end_per_group(_GroupName, _Config) ->
-  ram_test_suite_helper:clean_after_test().
+end_per_group(_GroupName, Config) ->
+  Peers = proplists:get_value(peers, Config),
+  _ = ram_test_suite_helper:end_cluster(Peers).
 
 %% -------------------------------------------------------------------
 %% Function: init_per_testcase(TestCase, Config0) ->
@@ -144,26 +139,19 @@ init_per_testcase(TestCase, Config) ->
 %% Reason = any()
 %% -------------------------------------------------------------------
 end_per_testcase(_, _Config) ->
-  ram_test_suite_helper:clean_after_test().
+  ok.
 
 %% ===================================================================
 %% Tests
 %% ===================================================================
 three_nodes_cluster_crud(Config) ->
-  %% get slaves
-  Node = node(),
-  SlaveNode1 = proplists:get_value(ram_slave_1, Config),
-  SlaveNode2 = proplists:get_value(ram_slave_2, Config),
-
-  %% start ram on nodes
-  ok = ram:start(),
-  ok = rpc:call(SlaveNode1, ram, start, []),
-  ok = rpc:call(SlaveNode2, ram, start, []),
+  Nodes = lists:sort(proplists:get_value(nodes, Config)),
+  [Node1, Node2, Node3] = Nodes,
 
   %% start cluster
-  ok = ram:start_cluster([node(), SlaveNode1, SlaveNode2]),
+  ok = ram:start_cluster([Node1, Node2, Node3]),
 
   %% check nodes
-  [Node, SlaveNode1, SlaveNode2] = ram:nodes(),
-  [Node, SlaveNode1, SlaveNode2] = rpc:call(SlaveNode1, ram, nodes, []),
-  [Node, SlaveNode1, SlaveNode2] = rpc:call(SlaveNode2, ram, nodes, []).
+  Nodes = lists:sort(rpc:call(Node1, ram, nodes, [])),
+  Nodes = lists:sort(rpc:call(Node2, ram, nodes, [])),
+  Nodes = lists:sort(rpc:call(Node3, ram, nodes, [])).
