@@ -32,6 +32,8 @@
 
 %% API
 -export([start/0, stop/0]).
+-export([start_cluster/1, start_cluster/2]).
+-export([nodes/0]).
 
 %% ===================================================================
 %% API
@@ -42,10 +44,38 @@
 %% however you may use this helper method to start it manually.
 -spec start() -> ok.
 start() ->
-    {ok, _} = application:ensure_all_started(ram),
-    ok.
+  {ok, _} = application:ensure_all_started(ram),
+  ok.
 
 %% @doc Stops Ram manually.
 -spec stop() -> ok | {error, Reason :: term()}.
 stop() ->
-    application:stop(ram).
+  application:stop(ram).
+
+%% @equiv start_cluster(Nodes, 5000)
+%% @end
+-spec start_cluster(Nodes :: [node()]) -> ok | {error, [{node(), Reason :: term()}]}.
+start_cluster(Nodes) ->
+  start_cluster(Nodes, 5000).
+
+%%%% @doc Starts the Ram cluster with a custom timeout. The timeout specifies the max waiting time for a node
+%%%% to start a ram process, after it successfully connected to the cluster.
+-spec start_cluster(Nodes :: [node()], Timeout :: non_neg_integer()) ->
+  ok | {error, [{node(), Reason :: term()}]}.
+start_cluster(Nodes, Timeout) ->
+  StartErrors = lists:foldl(fun(Node, Acc) ->
+    case rpc:call(Node, ram_sup, start_ram_node, [Nodes], Timeout) of
+      ok -> Acc;
+      {error, Reason} -> [{Node, Reason} | Acc];
+      {badrpc, Reason} -> [{Node, Reason} | Acc]
+    end
+  end, [], Nodes),
+
+  case StartErrors of
+    [] -> ok;
+    _ -> {error, StartErrors}
+  end.
+
+-spec nodes() -> [{node(), ram_node:state()}].
+nodes() ->
+  ram_node:nodes().

@@ -23,16 +23,18 @@
 %% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 %% THE SOFTWARE.
 %% ==========================================================================================================
+%% @private
 -module(ram_node).
 -behaviour(gen_statem).
 
 %% API
 -export([
-  start_link/0
+  start_link/1,
+  nodes/0
 ]).
 
 %% states
--export([noop/3]).
+-export([follower/3]).
 
 %% gen_statem callbacks
 -export([
@@ -43,15 +45,25 @@
 ]).
 
 %% records
--record(data, {}).
+-record(data, {
+  cluster_nodes = [] :: [node()]
+}).
+
+%% types
+-type state() :: follower | candidate | leader.
+-export_type([state/0]).
 
 %% ===================================================================
 %% API
 %% ===================================================================
--spec start_link() -> {ok, pid()} | {error, term()}.
-start_link() ->
+-spec start_link(ClusterNodes :: [node()]) -> gen_statem:start_ret().
+start_link(ClusterNodes) ->
   Options = [],
-  gen_statem:start_link({local, ?MODULE}, ?MODULE, [], Options).
+  gen_statem:start_link({local, ?MODULE}, ?MODULE, [ClusterNodes], Options).
+
+-spec nodes() -> [{node(), state()}].
+nodes() ->
+  gen_statem:call(?MODULE, nodes).
 
 %% ===================================================================
 %% Callbacks
@@ -63,31 +75,27 @@ callback_mode() ->
 %% ----------------------------------------------------------------------------------------------------------
 %% Init
 %% ----------------------------------------------------------------------------------------------------------
--spec init([]) ->
-  {ok, State :: atom(), #data{}} |
-  {ok, State :: atom(), #data{}, Actions :: [gen_statem:action()] | gen_statem:action()} |
-  ignore |
-  {stop, Reason :: term()}.
-init([]) ->
+-spec init([ClusterNodes :: [node()]]) -> gen_statem:init_result(gen_statem:state_name()).
+init([ClusterNodes]) ->
   %% init
-  {ok, noop, #data{}}.
+  {ok, follower, #data{
+    cluster_nodes = ClusterNodes
+  }}.
 
 %% ----------------------------------------------------------------------------------------------------------
-%% noop state
+%% follower state
 %% ----------------------------------------------------------------------------------------------------------
--spec noop(
-    enter | gen_statem:external_event_type() | gen_statem:timeout_event_type() | internal,
-    EventContent :: term(),
-    #data{}
-) ->
-  {next_state, State :: atom(), #data{}} |
-  {next_state, State :: atom(), #data{}, Actions :: [gen_statem:enter_action()] | gen_statem:enter_action()} |
+-spec follower(gen_statem:event_type(), EventContent :: term(), #data{}) ->
+  {next_state, gen_statem:state_name(), #data{}} |
+  {next_state, gen_statem:state_name(), #data{}, Actions :: [gen_statem:enter_action()] | gen_statem:enter_action()} |
   gen_statem:state_callback_result(gen_statem:enter_action()).
-noop(enter, _OldState, Data) ->
-  {keep_state, Data};
-noop(EventType, EventContent, Data) ->
-  error_logger:warning_msg("RAM[~s] Received an unknown event ~p: ~p", [node(), EventType, EventContent]),
-  {keep_state, Data}.
+follower(enter, _OldState, _Data) ->
+  keep_state_and_data;
+follower({call, From}, nodes, #data{cluster_nodes = ClusterNodes}) ->
+  {keep_state_and_data, {reply, From, ClusterNodes}};
+follower(EventType, EventContent, _Data) ->
+  error_logger:warning_msg("RAM[~s] Received an unknown event while follower ~p: ~p", [node(), EventType, EventContent]),
+  keep_state_and_data.
 
 %% ----------------------------------------------------------------------------------------------------------
 %% Terminate

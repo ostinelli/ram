@@ -29,6 +29,7 @@
 
 %% API
 -export([start_link/0]).
+-export([start_ram_node/1]).
 
 %% supervisor callbacks
 -export([init/1]).
@@ -36,24 +37,30 @@
 %% ===================================================================
 %% API
 %% ===================================================================
--spec start_link() -> {ok, pid()} | {already_started, pid()} | shutdown.
+-spec start_link() -> supervisor:startlink_ret().
 start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+  supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+
+-spec start_ram_node([node()]) -> ok | {error, supervisor:startchild_err()}.
+start_ram_node(ClusterNodes) ->
+  ChildSpecs = #{
+    id => ram_node,
+    start => {ram_node, start_link, [ClusterNodes]},
+    type => worker,
+    shutdown => 10000,
+    restart => permanent,
+    modules => [ram_node]
+  },
+  case supervisor:start_child(?MODULE, ChildSpecs) of
+    {ok, _} -> ok;
+    {ok, _, _} -> ok;
+    {error, Reason} -> {error, Reason}
+  end.
 
 %% ===================================================================
 %% Callbacks
 %% ===================================================================
--spec init([]) ->
-    {ok, {{supervisor:strategy(), non_neg_integer(), pos_integer()}, [supervisor:child_spec()]}}.
+-spec init([]) -> {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}} | ignore.
 init([]) ->
-    Children = [
-        #{
-            id => ram_node,
-            start => {ram_node, start_link, []},
-            type => worker,
-            shutdown => 10000,
-            restart => permanent,
-            modules => [ram_node]
-        }
-    ],
-    {ok, {{one_for_one, 10, 10}, Children}}.
+  Children = [],
+  {ok, {{one_for_one, 10, 10}, Children}}.
