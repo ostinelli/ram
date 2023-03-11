@@ -1,14 +1,14 @@
 {application, ram,
     [
-        {description, "A distributed KV store for Erlang and Elixir."},
-        {vsn, "0.5.0"},
+        {description, "A distributed in-memory KV store for Erlang and Elixir."},
+        {vsn, "0.6.0"},
         {registered, [
-            ram_sup
+            ram_sup,
+            ram_node
         ]},
         {applications, [
             kernel,
-            stdlib,
-            ra
+            stdlib
         ]},
         {mod, {ram_app, []}},
         {env, []},

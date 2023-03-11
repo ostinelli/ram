@@ -3,7 +3,7 @@
 %%
 %% The MIT License (MIT)
 %%
-%% Copyright (c) 2021-2022 Roberto Ostinelli <roberto@ostinelli.net>.
+%% Copyright (c) 2023 Roberto Ostinelli <roberto@ostinelli.net>.
 %%
 %% Permission is hereby granted, free of charge, to any person obtaining a copy
 %% of this software and associated documentation files (the "Software"), to deal
@@ -46,5 +46,14 @@ start_link() ->
 -spec init([]) ->
     {ok, {{supervisor:strategy(), non_neg_integer(), pos_integer()}, [supervisor:child_spec()]}}.
 init([]) ->
-    Children = [],
+    Children = [
+        #{
+            id => ram_node,
+            start => {ram_node, start_link, []},
+            type => worker,
+            shutdown => 10000,
+            restart => permanent,
+            modules => [ram_node]
+        }
+    ],
     {ok, {{one_for_one, 10, 10}, Children}}.
